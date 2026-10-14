@@ -26,6 +26,9 @@ Rough order within each section. Done items live in git history, not here.
 
 ## World
 
+- [ ] More biomes (forest, swamp, snow, ruined city) with their own textures; the three now only differ in tint, shape and surfaces
+- [ ] Atmosphere per biome: sky, fog, time of day, weather
+- [ ] Blend ground materials between biomes instead of switching at the boundary
 - [ ] More dirt detail, then grass
 - [ ] Worn paint and cracked asphalt for the post-apocalyptic look (more texture variants), potholes and sand drifts
 - [ ] Give the generated asphalt a normal map; its grain is flatter than the game's own asphalt

@@ -1,4 +1,5 @@
 -- Deterministic endless road. Nodes are generated in order from the seed and cached.
+-- The road is a sequence of regions, each one a surface inside a biome, also generated from the seed.
 
 local M = {}
 
@@ -6,6 +7,9 @@ local TURN_MEMORY = 0.92 -- how much of the previous turn rate carries over
 local ROLLER_SCALE = 0.35 -- rollers are this fraction of the hill wavelength
 local CONTRAST = 1.7 -- smooth noise hugs the middle, so stretch it to use the height range
 local EASE_IN_DISTANCE = 400 -- the road starts at ground level and eases into the hills over this distance
+
+local ROAD_KEYS = { "width", "moundHeight", "shoulder", "embankment" }
+local TERRAIN_KEYS = { "relief", "reliefScale", "blendDistance" }
 
 local state
 
@@ -36,18 +40,16 @@ local function smoothNoise(x)
   return a + (latticeValue(i + 1) - a) * u
 end
 
----Target road height at a distance along the road: big hills with shorter rollers on top.
+---Target road height at a distance along the road for one biome's hills: big hills with shorter rollers on top.
+---@param hills table that biome's hills config
 ---@param distance number metres from the start
 ---@return number
-local function heightAt(distance)
-  local hills = aLongDrive_config.hills
+local function heightFor(hills, distance)
   local big = smoothNoise(distance / hills.wavelength)
   local rollers = smoothNoise(distance / (hills.wavelength * ROLLER_SCALE) + 31.7)
   local mix = (1 - hills.rollers) * big + hills.rollers * rollers
   local fraction = clamp(0.5 + (mix - 0.5) * CONTRAST, 0, 1)
-  local ease = clamp(distance / EASE_IN_DISTANCE, 0, 1)
-  ease = ease * ease * (3 - 2 * ease)
-  return hills.minHeight + (hills.maxHeight - hills.minHeight) * fraction * ease
+  return hills.minHeight + (hills.maxHeight - hills.minHeight) * fraction
 end
 
 ---@param seed number
@@ -61,105 +63,174 @@ function M.reset(seed, startX, startY, startZ, heading)
     heading = heading,
     turn = 0,
     heightSeed = (seed % 10007) * 0.73,
-    surfaceRng = (seed * 2654435761 + 97) % 4294967296, -- separate from the road's own random stream
-    surfaceRuns = {},
+    regionRng = (seed * 2654435761 + 97) % 4294967296, -- separate from the road's own random stream
+    regions = {},
+    biomeEnd = -1, -- last node of the biome stretch being laid out
     nodes = { { x = startX, y = startY, z = startZ } },
   }
 end
 
----@return number random value in [0, 1) from the surface stream
-local function surfaceRandom()
-  state.surfaceRng = (state.surfaceRng * 1664525 + 1013904223) % 4294967296
-  return state.surfaceRng / 4294967296
+---@return number random value in [0, 1) from the region stream
+local function regionRandom()
+  state.regionRng = (state.regionRng * 1664525 + 1013904223) % 4294967296
+  return state.regionRng / 4294967296
 end
 
----Appends the next stretch of one surface: a different one from the last, picked by weight.
-local function addSurfaceRun()
-  local cfg = aLongDrive_config
-  local list, runs = cfg.surfaces, state.surfaceRuns
-  local previous = runs[#runs]
-
-  local chosen, total = 1, 0
-  for k, surface in ipairs(list) do
-    if not previous or k ~= previous.surface then total = total + surface.weight end
+---Index of the entry in `list` picked by weight, skipping `skip`. Nil if nothing is left to pick.
+---@param list table[] entries with a weight
+---@param skip integer?
+---@return integer?
+local function pickWeighted(list, skip)
+  local total = 0
+  for k, entry in ipairs(list) do
+    if k ~= skip then total = total + entry.weight end
   end
-  if previous and #list > 1 then
-    local pick = surfaceRandom() * total
-    for k, surface in ipairs(list) do
-      if k ~= previous.surface then
-        pick = pick - surface.weight
-        chosen = k
-        if pick <= 0 then break end
-      end
+  if total <= 0 then return nil end
+  local pick, chosen = regionRandom() * total, nil
+  for k, entry in ipairs(list) do
+    if k ~= skip then
+      chosen = k
+      pick = pick - entry.weight
+      if pick <= 0 then break end
+    end
+  end
+  return chosen
+end
+
+---Appends the next stretch of one surface. When the biome stretch is used up, a different biome starts.
+local function addRegion()
+  local spacing = aLongDrive_config.road.spacing
+  local biomes = aLongDrive_biomes
+  local regions = state.regions
+  local previous = regions[#regions]
+  local first = previous and previous.last + 1 or 0
+
+  local biome, newBiome = previous and previous.biome or 1, not previous
+  if previous and first > state.biomeEnd then
+    local defs = {}
+    for index = 1, biomes.count() do defs[index] = biomes.def(index) end
+    biome = pickWeighted(defs, biomes.count() > 1 and previous.biome or nil) or previous.biome
+    newBiome = biome ~= previous.biome
+  end
+  if not previous or first > state.biomeEnd then
+    local def = biomes.def(biome)
+    state.biomeEnd = first + math.max(1, math.ceil((def.minLength + regionRandom() * (def.maxLength - def.minLength)) / spacing)) - 1
+  end
+
+  local surfaces = biomes.get(biome).surfaces
+  local surface
+  if not previous then
+    surface = 1 -- the road starts on the first surface of the first biome
+  elseif newBiome then
+    surface = pickWeighted(surfaces, nil) or 1
+  else
+    surface = pickWeighted(surfaces, previous.surface)
+    if not surface then -- the biome has one surface: carry on with it to the end of the stretch
+      previous.last = state.biomeEnd
+      return
     end
   end
 
-  local surface = list[chosen]
-  local length = surface.minLength + surfaceRandom() * (surface.maxLength - surface.minLength)
-  local first = previous and previous.last + 1 or 0
-  runs[#runs + 1] = { first = first, last = first + math.max(1, math.ceil(length / cfg.road.spacing)) - 1, surface = chosen }
+  local def = surfaces[surface]
+  local length = math.max(1, math.ceil((def.minLength + regionRandom() * (def.maxLength - def.minLength)) / spacing))
+  regions[#regions + 1] = { first = first, last = math.min(first + length - 1, state.biomeEnd), biome = biome, surface = surface }
 end
 
----Index of the run covering segment i, generating runs as far as needed.
+---Index of the region covering segment i, generating regions as far as needed.
 ---@param i integer segment index
 ---@return integer
-local function runIndexFor(i)
-  local runs = state.surfaceRuns
-  while #runs == 0 or runs[#runs].last < i do addSurfaceRun() end
-  for k = #runs, 1, -1 do
-    if runs[k].first <= i then return k end
+local function regionIndexFor(i)
+  local regions = state.regions
+  while #regions == 0 or regions[#regions].last < i do addRegion() end
+  for k = #regions, 1, -1 do
+    if regions[k].first <= i then return k end
   end
   return 1
 end
 
 ---@param i integer segment index: the stretch from node i to node i + 1
----@return integer index into config.surfaces
-function M.getSurface(i)
-  return state.surfaceRuns[runIndexFor(i)].surface
+---@return {biome: integer, surface: integer} indexes into the biome list and that biome's surfaces
+function M.getRegion(i)
+  local region = state.regions[regionIndexFor(i)]
+  return { biome = region.biome, surface = region.surface }
 end
 
-local PROFILE_KEYS = { "width", "moundHeight", "shoulder", "embankment" }
-
----A surface's own road settings: what its `road` table sets, and the shared defaults for the rest.
----@param index integer index into config.surfaces
----@return {width: number, moundHeight: number, shoulder: number, embankment: number}
-function M.getSurfaceProfile(index)
-  local cfg = aLongDrive_config
-  local overrides = cfg.surfaces[index].road or {}
-  local profile = {}
-  for _, key in ipairs(PROFILE_KEYS) do profile[key] = overrides[key] or cfg.road[key] end
-  return profile
-end
-
----The road's cross-section settings at a position along it. Within a surface they are that surface's own;
----around a boundary they ease from one surface's to the other's over config.surfaceTransition metres.
+---The region at f and, when f is close to a boundary, the region across it and how much of it to mix in.
+---The neighbour's share is half at the boundary, so both sides agree there, and fades out smoothly.
 ---@param f number fractional node index
----@return {width: number, moundHeight: number, shoulder: number, embankment: number}
-function M.getProfile(f)
+---@return table region, table? neighbour, number? share
+local function blendAt(f)
   local cfg = aLongDrive_config
-  local k = runIndexFor(math.floor(f))
-  local runs = state.surfaceRuns
-  local run = runs[k]
-  local profile = M.getSurfaceProfile(run.surface)
+  local k = regionIndexFor(math.floor(f))
+  local regions = state.regions
+  local region = regions[k]
 
-  local half = cfg.surfaceTransition / cfg.road.spacing / 2 -- nodes either side of a boundary
-  if half <= 0 then return profile end
-  local fromStart, fromEnd = f - run.first, run.last + 1 - f
+  local fromStart, fromEnd = f - region.first, region.last + 1 - f
   local neighbour, distance
   if fromStart <= fromEnd then
-    neighbour, distance = runs[k - 1], fromStart
+    neighbour, distance = regions[k - 1], fromStart
   else
-    runIndexFor(run.last + 1) -- make sure the next run exists
-    neighbour, distance = runs[k + 1], fromEnd
+    regionIndexFor(region.last + 1) -- make sure the next region exists
+    neighbour, distance = regions[k + 1], fromEnd
   end
-  if not neighbour or distance >= half then return profile end
+  if not neighbour then return region end
 
-  -- the neighbour's share is half at the boundary, so both sides agree there, and fades out smoothly
+  local length = neighbour.biome ~= region.biome and cfg.biomeTransition or cfg.surfaceTransition
+  local half = length / cfg.road.spacing / 2 -- nodes either side of the boundary
+  if half <= 0 or distance >= half then return region end
   local t = distance / half
-  local share = 0.5 * (1 - t * t * (3 - 2 * t))
-  local other = M.getSurfaceProfile(neighbour.surface)
-  for _, key in ipairs(PROFILE_KEYS) do profile[key] = profile[key] + (other[key] - profile[key]) * share end
+  return region, neighbour, 0.5 * (1 - t * t * (3 - 2 * t))
+end
+
+---The numbers a region sets for the cross-section of the road and the shape of the terrain around it.
+---@param region {biome: integer, surface: integer}
+---@return {width: number, moundHeight: number, shoulder: number, embankment: number, relief: number, reliefScale: number, blendDistance: number}
+function M.getRegionProfile(region)
+  local biomeConfig = aLongDrive_biomes.get(region.biome)
+  local overrides = biomeConfig.surfaces[region.surface].road or {}
+  local profile = {}
+  for _, key in ipairs(ROAD_KEYS) do profile[key] = overrides[key] or biomeConfig.road[key] end
+  for _, key in ipairs(TERRAIN_KEYS) do profile[key] = biomeConfig.terrain[key] end
   return profile
+end
+
+---The settings at a position along the road. Inside a region they are its own; around a boundary they
+---ease from one region's to the other's, over config.surfaceTransition or config.biomeTransition metres.
+---@param f number fractional node index
+---@return {width: number, moundHeight: number, shoulder: number, embankment: number, relief: number, reliefScale: number, blendDistance: number}
+function M.getProfile(f)
+  local region, neighbour, share = blendAt(f)
+  local profile = M.getRegionProfile(region)
+  if not neighbour then return profile end
+  local other = M.getRegionProfile(neighbour)
+  for key, value in pairs(profile) do profile[key] = value + (other[key] - value) * share end
+  return profile
+end
+
+---@param f number fractional node index
+---@return integer biome index of the region at f
+function M.getBiome(f)
+  return state.regions[regionIndexFor(math.floor(f))].biome
+end
+
+---Height and steepest allowed grade for the node at index i, blending the hills of two biomes across a boundary.
+---@param i integer node index
+---@param spacing number
+---@return number height, number maxGrade
+local function hillsAt(i, spacing)
+  local distance = i * spacing
+  local region, neighbour, share = blendAt(i)
+  local hills = aLongDrive_biomes.get(region.biome).hills
+  local height, grade = heightFor(hills, distance), hills.maxGrade
+  if neighbour and neighbour.biome ~= region.biome then
+    local other = aLongDrive_biomes.get(neighbour.biome).hills
+    height = height + (heightFor(other, distance) - height) * share
+    grade = grade + (other.maxGrade - grade) * share
+  end
+  local ease = clamp(distance / EASE_IN_DISTANCE, 0, 1)
+  ease = ease * ease * (3 - 2 * ease)
+  local floor = hills.minHeight
+  return floor + (height - floor) * ease, grade
 end
 
 ---@param i integer node index, 0-based
@@ -171,11 +242,12 @@ function M.getNode(i)
     local last = nodes[#nodes]
     state.turn = clamp(state.turn * TURN_MEMORY + (nextRandom() - 0.5) * 0.04, -cfg.road.maxTurn, cfg.road.maxTurn)
     state.heading = state.heading + state.turn
-    local maxStep = cfg.hills.maxGrade * cfg.road.spacing
+    local target, grade = hillsAt(#nodes, cfg.road.spacing)
+    local maxStep = grade * cfg.road.spacing
     nodes[#nodes + 1] = {
       x = last.x + math.cos(state.heading) * cfg.road.spacing,
       y = last.y + math.sin(state.heading) * cfg.road.spacing,
-      z = clamp(heightAt(#nodes * cfg.road.spacing), last.z - maxStep, last.z + maxStep),
+      z = clamp(target, last.z - maxStep, last.z + maxStep),
     }
   end
   return nodes[i + 1]

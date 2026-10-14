@@ -75,5 +75,63 @@
       {},
       {}
     ]
+  },
+  "aLongDrive_dirt_red": {
+    "name": "aLongDrive_dirt_red",
+    "mapTo": "aLongDrive_dirt_red",
+    "class": "Material",
+    "version": 1.5,
+    "groundType": "DIRT",
+    "doubleSided": true,
+    "translucentBlendOp": "None",
+    "Stages": [
+      {
+        "baseColorMap": "/assets/materials/tileable/soil/t_italy_terrain_dirt/t_italy_terrain_dirt_b.color.png",
+        "baseColorFactor": [
+          0.6,
+          0.24,
+          0.15,
+          1
+        ],
+        "normalMap": "/assets/materials/tileable/soil/t_italy_terrain_dirt/t_italy_terrain_dirt_nm.normal.png",
+        "roughnessFactor": 0.69,
+        "detailScale": [
+          0.2,
+          0.2
+        ]
+      },
+      {},
+      {},
+      {}
+    ]
+  },
+  "aLongDrive_dirt_salt": {
+    "name": "aLongDrive_dirt_salt",
+    "mapTo": "aLongDrive_dirt_salt",
+    "class": "Material",
+    "version": 1.5,
+    "groundType": "DIRT",
+    "doubleSided": true,
+    "translucentBlendOp": "None",
+    "Stages": [
+      {
+        "baseColorMap": "/assets/materials/tileable/soil/t_italy_terrain_dirt/t_italy_terrain_dirt_b.color.png",
+        "baseColorFactor": [
+          0.92,
+          0.9,
+          0.84,
+          1
+        ],
+        "normalMap": "/assets/materials/tileable/soil/t_italy_terrain_dirt/t_italy_terrain_dirt_nm.normal.png",
+        "roughnessFactor": 0.69,
+        "detailScale": [
+          0.2,
+          0.2
+        ]
+      },
+      {},
+      {},
+      {}
+    ]
   }
 }

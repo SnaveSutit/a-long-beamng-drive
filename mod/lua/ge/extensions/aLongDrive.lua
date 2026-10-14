@@ -1,11 +1,11 @@
 -- A Long Drive: endless procedural road and terrain with a floating origin.
 
 local M = {}
-M.dependencies = { "ui_imgui", "aLongDrive_config", "aLongDrive_road", "aLongDrive_meshBuilder", "aLongDrive_pickups", "aLongDrive_hud" }
+M.dependencies = { "ui_imgui", "aLongDrive_config", "aLongDrive_biomes", "aLongDrive_road", "aLongDrive_meshBuilder", "aLongDrive_pickups", "aLongDrive_hud" }
 
 local RESET_HEIGHT = 0.5 -- reset position above the road surface
--- unload order for a reload: the extension first, then what it depends on
-local MODULES = { "aLongDrive", "aLongDrive_hud", "aLongDrive_pickups", "aLongDrive_meshBuilder", "aLongDrive_road", "aLongDrive_config" }
+-- unload order for a reload: the extension first, then what it depends on, the biome files last
+local MODULES = { "aLongDrive", "aLongDrive_hud", "aLongDrive_pickups", "aLongDrive_meshBuilder", "aLongDrive_road", "aLongDrive_biomes", "aLongDrive_config" }
 local UNPACKED_MOD = "/mods/unpacked/a_long_drive/"
 local MAX_SHOULDER = 12
 local TELEPORT_GRACE_FRAMES = 3
@@ -206,6 +206,7 @@ local function begin(veh, seed)
   offset = vec3(0, 0, 0)
   playerNode, carRoadNode = behind, behind
   distance, lastVirtual, resetNode = 0, nil, nil
+  aLongDrive_biomes.reset()
   aLongDrive_pickups.reset(seed)
   aLongDrive_road.reset(seed, pos.x - math.cos(heading) * back, pos.y - math.sin(heading) * back, aLongDrive_config.hills.minHeight, heading)
   aLongDrive_meshBuilder.setSeed(seed)
@@ -247,11 +248,17 @@ function M.rebuild()
   updateChunks()
 end
 
+---The biome under the player, or the first one when no road is running.
+---@return integer
+local function currentBiome()
+  return active and aLongDrive_road.getBiome(playerNode) or 1
+end
+
 ---@param width number metres of flat ground beside the road edge
----@param surfaceName? string one surface, or every surface if omitted
+---@param surfaceName? string one surface of the current biome, or all of its surfaces if omitted
 function M.setShoulder(width, surfaceName)
   width = math.max(0, math.min(width, MAX_SHOULDER))
-  for _, def in ipairs(aLongDrive_config.surfaces) do
+  for _, def in ipairs(aLongDrive_biomes.get(currentBiome()).surfaces) do
     if not surfaceName or def.name == surfaceName then
       def.road = def.road or {}
       def.road.shoulder = width
@@ -273,12 +280,13 @@ function M.newGame()
   return { ok = ok, error = reason, seed = ok and currentSeed or nil }
 end
 
----For the settings page.
----@return {active: boolean, seed: integer?, devMode: boolean, walking: boolean, maxShoulder: number, surfaces: {name: string, shoulder: number}[]}
+---For the settings page. Surfaces are those of the biome under the player.
+---@return {active: boolean, seed: integer?, devMode: boolean, walking: boolean, maxShoulder: number, biome: string, surfaces: {name: string, shoulder: number}[]}
 function M.getState()
+  local biome = currentBiome()
   local surfaces = {}
-  for index, def in ipairs(aLongDrive_config.surfaces) do
-    surfaces[#surfaces + 1] = { name = def.name, shoulder = aLongDrive_road.getSurfaceProfile(index).shoulder }
+  for index, def in ipairs(aLongDrive_biomes.get(biome).surfaces) do
+    surfaces[#surfaces + 1] = { name = def.name, shoulder = aLongDrive_road.getRegionProfile({ biome = biome, surface = index }).shoulder }
   end
   return {
     active = active,
@@ -286,6 +294,7 @@ function M.getState()
     devMode = aLongDrive_config.devMode,
     walking = isWalking(),
     maxShoulder = MAX_SHOULDER,
+    biome = aLongDrive_biomes.def(biome).name,
     surfaces = surfaces,
   }
 end
@@ -300,7 +309,9 @@ function M.reload()
     FS:unmount(UNPACKED_MOD)
     FS:mount(UNPACKED_MOD)
   end
+  local biomeModules = aLongDrive_biomes.moduleNames()
   for _, name in ipairs(MODULES) do extensions.unload(name) end
+  for _, name in ipairs(biomeModules) do extensions.unload(name) end
   extensions.load("aLongDrive")
   if not aLongDrive then return { ok = false, restarted = false, error = "The mod failed to load again. Check the log." } end
 

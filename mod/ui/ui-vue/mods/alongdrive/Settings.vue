@@ -17,6 +17,10 @@
         <div class="ald-label">Seed</div>
         <div class="ald-value">{{ state.seed ?? "-" }}</div>
       </div>
+      <div>
+        <div class="ald-label">Biome</div>
+        <div class="ald-value">{{ state.active ? state.biome : "-" }}</div>
+      </div>
     </section>
 
     <section class="ald-row">
@@ -48,10 +52,11 @@
 
     <section v-for="surface in state.surfaces" :key="surface.name" class="ald-row">
       <div class="ald-copy">
-        <div class="ald-label">Shoulder width: {{ surface.name }}</div>
+        <div class="ald-label">Shoulder width: {{ state.biome }} {{ surface.name }}</div>
         <div class="ald-desc">
-          Flat ground beside the {{ surface.name }} road before the embankment starts. A running road is rebuilt in
-          place. For a lasting change, set <code>road.shoulder</code> on the surface in config.lua.
+          Flat ground beside the {{ surface.name }} road in the biome you are driving through, before the embankment
+          starts. A running road is rebuilt in place. For a lasting change, set <code>road.shoulder</code> on the
+          surface in that biome's file.
         </div>
       </div>
       <BngSlider
@@ -98,7 +103,7 @@ const error = ref("")
 let settingsCard = null
 let pollTimer = null
 
-const state = reactive({ active: false, seed: null, devMode: false, walking: false, maxShoulder: 12, surfaces: [] })
+const state = reactive({ active: false, seed: null, devMode: false, walking: false, maxShoulder: 12, biome: "", surfaces: [] })
 
 function runLua(code) {
   return new Promise(resolve => api.engineLua(code, resolve))
@@ -232,7 +237,7 @@ onUnmounted(() => {
 
 .ald-status {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 1rem;
   padding: 0.9rem 0;
   border-top: 1px solid rgba(255, 255, 255, 0.12);

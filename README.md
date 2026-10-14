@@ -14,7 +14,19 @@ Work in progress. The prototype runs on the `smallgrid` level.
 
 ## The road
 
-The road bed is a mound: flat out to the shoulder, then an embankment sloping down to the ground. Paved stretches have white edge lines and a dashed yellow centre line, painted into the paved road texture (`mod/art/aLongDrive/road_paved.png`). Regenerate it with `bun tools/make-road-texture.ts`; keep the road width and texture length in the script in step with `config.lua`. The road switches between surfaces (paved and dirt to start with) in stretches of a random length, set from the seed. Each surface has its own material and ground type, so the car grips differently. Each surface has its own `road` table in `config.lua` (`width`, `moundHeight`, `shoulder`, `embankment`), which overrides the shared defaults in `M.road`. Where two surfaces meet, the road eases from one cross-section to the other over `surfaceTransition` metres. The Mods page has a shoulder width slider per surface; pickups sit on the shoulder wherever it is set.
+The road bed is a mound: flat out to the shoulder, then an embankment sloping down to the ground. Paved stretches have white edge lines and a dashed yellow centre line, painted into the paved road texture (`mod/art/aLongDrive/road_paved.png`). Regenerate it with `bun tools/make-road-texture.ts`; keep the road width and texture length in the script in step with the paved surface in the desert biome.
+
+## Biomes
+
+The road passes through biomes, each a stretch of random length picked from the seed. A biome overrides parts of the base config in `mod/lua/ge/extensions/aLongDrive/config.lua`: its road surfaces (and each surface's `width`, `moundHeight`, `shoulder` and `embankment`), hills, the terrain's relief and ground material, and its pickup rates and props. Tables merge key by key over the base; lists such as `surfaces` and `pickupProps` are replaced whole.
+
+| Biome | Hills | Ground | Road |
+|---|---|---|---|
+| desert | rolling, up to 100 m | brown | paved and dirt |
+| badlands | steep and choppy, up to 140 m | red | mostly dirt, narrow |
+| saltPlain | almost flat | pale | wide, paved |
+
+To add a biome, copy one of the files in `aLongDrive/biomes/`, change what you want, and list its name in `M.biomes` in `config.lua`. Where two biomes meet, widths, mound, hill height and relief ease over `biomeTransition` metres (surfaces within a biome over `surfaceTransition`); the ground material and the road material switch at the boundary. The Mods page shows the biome you are in, with a shoulder slider for each of its surfaces.
 
 ## Collect pickups
 
@@ -22,7 +34,7 @@ Pickups are real props beside the road: steel barrels for fuel, cardboard boxes 
 
 ## Tune it
 
-Everything adjustable lives in `mod/lua/ge/extensions/aLongDrive/config.lua`: road width, hill height, steepness, spacing, roughness and mesh detail, terrain width and relief, materials. After editing, reload with `extensions.reload("aLongDrive")`.
+The base settings live in `mod/lua/ge/extensions/aLongDrive/config.lua` (biomes override them): road width, hill height, steepness, spacing, roughness and mesh detail, terrain width and relief, materials. After editing, reload with `extensions.reload("aLongDrive")`.
 
 ## Pick the pickup props
 

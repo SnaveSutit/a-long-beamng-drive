@@ -4,7 +4,7 @@
 local M = {}
 
 local seed = 0
-local props = {} -- pickup kind -> configured props that exist
+local props = {} -- biome index -> pickup kind -> configured props that exist
 local COLLISION_SETTLE_FRAMES = 10 -- props spawned sooner fall through terrain whose collision isn't live yet
 
 local active = {} -- chunk -> { pickup }
@@ -42,25 +42,29 @@ end
 ---@return table[] placements { kind, slot, config, yaw, x, y, z } in virtual coordinates, minus anything already collected
 local function placementsFor(chunk)
   local cfg = aLongDrive_config
-  local rates = cfg.devMode and cfg.pickups.dev or cfg.pickups.normal
-  local random = randomFor(chunk)
   local firstNode = chunk * (cfg.chunks.nodes - 1)
+  -- a chunk takes the pickup settings and props of the biome in its middle
+  local biome = aLongDrive_road.getBiome(firstNode + math.floor((cfg.chunks.nodes - 1) / 2))
+  local biomeConfig = aLongDrive_biomes.get(biome)
+  local rates = cfg.devMode and biomeConfig.pickups.dev or biomeConfig.pickups.normal
+  local biomeProps = props[biome]
+  local random = randomFor(chunk)
   local list, slots = {}, 0
 
   local function place(kind)
-    if #props[kind] == 0 then return end
+    if not biomeProps[kind] or #biomeProps[kind] == 0 then return end
     local along = random() * (cfg.chunks.nodes - 1)
     local i = firstNode + math.floor(along)
     local side = random() < 0.5 and -1 or 1
     -- on the flat shoulder, clear of both edges; a shoulder too narrow for that gets them down its middle
     local profile = aLongDrive_road.getProfile(i + along % 1)
-    local roadEdge, margin = profile.width / 2, cfg.pickups.shoulderMargin
+    local roadEdge, margin = profile.width / 2, biomeConfig.pickups.shoulderMargin
     local nearest, farthest = roadEdge + margin, roadEdge + profile.shoulder - margin
     if farthest < nearest then nearest, farthest = roadEdge + profile.shoulder / 2, roadEdge + profile.shoulder / 2 end
     local lateral = side * (nearest + random() * (farthest - nearest))
     local p = roadPoint(aLongDrive_road.getNode(i), aLongDrive_road.getNode(i + 1), along % 1, lateral)
     slots = slots + 1
-    local prop = props[kind][1 + math.floor(random() * #props[kind])]
+    local prop = biomeProps[kind][1 + math.floor(random() * #biomeProps[kind])]
     p.kind, p.chunk, p.slot = kind, chunk, slots
     p.model, p.config = prop.model, prop.config
     p.yaw = random() * 2 * math.pi
@@ -137,16 +141,22 @@ end
 ---spawn the model's default config for a typo instead.
 local function loadProps()
   props = {}
-  for kind, entries in pairs(aLongDrive_config.pickupProps) do
-    props[kind] = {}
-    for _, prop in ipairs(entries) do
-      if FS:fileExists(string.format("/vehicles/%s/%s.pc", prop.model, prop.config)) then
-        props[kind][#props[kind] + 1] = prop
-      else
-        log("W", "aLongDrive", string.format("pickupProps.%s: no config /vehicles/%s/%s.pc, skipping it", kind, prop.model, prop.config))
+  for biome = 1, aLongDrive_biomes.count() do
+    local biomeName = aLongDrive_biomes.def(biome).name
+    props[biome] = {}
+    for kind, entries in pairs(aLongDrive_biomes.get(biome).pickupProps) do
+      props[biome][kind] = {}
+      for _, prop in ipairs(entries) do
+        if FS:fileExists(string.format("/vehicles/%s/%s.pc", prop.model, prop.config)) then
+          props[biome][kind][#props[biome][kind] + 1] = prop
+        else
+          log("W", "aLongDrive", string.format("%s pickupProps.%s: no config /vehicles/%s/%s.pc, skipping it", biomeName, kind, prop.model, prop.config))
+        end
+      end
+      if #props[biome][kind] == 0 then
+        log("W", "aLongDrive", string.format("%s pickupProps.%s has no usable props, so no %s pickups will spawn there", biomeName, kind, kind))
       end
     end
-    if #props[kind] == 0 then log("W", "aLongDrive", "pickupProps." .. kind .. " has no usable props, so no " .. kind .. " pickups will spawn") end
   end
 end
 

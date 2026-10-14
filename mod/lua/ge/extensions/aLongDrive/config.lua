@@ -1,4 +1,11 @@
 -- Tunables for A Long Drive. Distances are in metres. Reload with: extensions.reload("aLongDrive")
+--
+-- This file is the base: it describes the default (desert) look and holds the settings that apply everywhere.
+-- Each biome in aLongDrive/biomes/ overrides what it wants, merged over this. Tables merge key by key;
+-- lists (surfaces, pickupProps) are replaced whole. A biome only changes these:
+--   road.width, moundHeight, shoulder, embankment (as defaults for its surfaces), surfaces, hills,
+--   terrain.relief, reliefScale, blendDistance, material, pickups and pickupProps.
+-- Everything else here is read from this file only.
 
 local M = {}
 
@@ -15,8 +22,14 @@ M.road = {
   embankment = 3, -- metres of slope per metre of drop. The drop is an S-curve, so its steepest part is 1.5x the average
 }
 
+-- The biomes the road passes through, by file name in aLongDrive/biomes/. The first is where the road starts.
+M.biomes = { "desert", "badlands", "saltPlain" }
+
 -- Where two surfaces meet, the road eases from one's cross-section to the other's over this many metres.
 M.surfaceTransition = 60
+
+-- The same for two biomes, which also ease hill height, wavelength and the terrain's relief. Longer, since more changes.
+M.biomeTransition = 400
 
 -- The road switches between these as it goes. Each stretch lasts a random length in metres.
 -- The first is where the road starts. textureLength is the metres along the road one texture repeat covers;
@@ -28,7 +41,7 @@ M.surfaces = {
   },
   {
     name = "dirt", material = "aLongDrive_roaddirt", textureLength = 6, weight = 1, minLength = 800, maxLength = 5000,
-    road = { width = 6, moundHeight = 0.3, shoulder = 1.5, embankment = 3 },
+    road = { width = 6, moundHeight = 0.1, shoulder = 1, embankment = 4 },
   },
 }
 

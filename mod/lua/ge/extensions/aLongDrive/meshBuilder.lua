@@ -36,9 +36,9 @@ local function valueNoise(x, y)
   return bottom + (top - bottom) * uy
 end
 
+---@param scale number wavelength of the off-road hills
 ---@return number off-road hill shape in [0, 1)
-local function reliefNoise(x, y)
-  local scale = aLongDrive_config.terrain.reliefScale
+local function reliefNoise(x, y, scale)
   return 0.65 * valueNoise(x / scale, y / scale) + 0.35 * valueNoise(x / (scale * 0.4) + 17.3, y / (scale * 0.4) + 9.1)
 end
 
@@ -157,7 +157,7 @@ end
 
 ---@param first integer first node of the chunk
 ---@param offset vec3
----@return table<integer, table> road meshes by surface index
+---@return table<string, {biome: integer, surface: integer, mesh: table}> road meshes by biome and surface
 local function buildRoad(first, offset)
   local cfg = aLongDrive_config
   local perNode = rowsPerNode()
@@ -180,15 +180,16 @@ local function buildRoad(first, offset)
     end
   end
 
-  -- one closed slab per stretch of segments with the same surface; the texture runs along the road
-  local meshes = {}
+  -- one closed slab per stretch of segments with the same biome and surface; the texture runs along the road
+  local meshes = {} -- keyed by "biome:surface"
   local runStart = 0
   for segment = 0, segments - 1 do
-    local surface = aLongDrive_road.getSurface(first + segment)
-    local nextSurface = segment + 1 < segments and aLongDrive_road.getSurface(first + segment + 1)
-    if surface ~= nextSurface then
-      local def = cfg.surfaces[surface]
-      meshes[surface] = meshes[surface] or newMesh(def.material)
+    local region = aLongDrive_road.getRegion(first + segment)
+    local nextRegion = segment + 1 < segments and aLongDrive_road.getRegion(first + segment + 1)
+    if not nextRegion or nextRegion.biome ~= region.biome or nextRegion.surface ~= region.surface then
+      local key = region.biome .. ":" .. region.surface
+      local def = aLongDrive_biomes.get(region.biome).surfaces[region.surface]
+      meshes[key] = meshes[key] or { biome = region.biome, surface = region.surface, mesh = newMesh(def.material) }
       local top = {}
       for r = runStart * perNode, (segment + 1) * perNode do
         local v = rows[r].f * cfg.road.spacing / def.textureLength
@@ -197,7 +198,7 @@ local function buildRoad(first, offset)
           { x = rows[r][2].x, y = rows[r][2].y, z = rows[r][2].z, nx = 0, ny = 0, nz = 1, u = 1, v = v },
         }
       end
-      addSlab(meshes[surface], top, #top, 2)
+      addSlab(meshes[key].mesh, top, #top, 2)
       runStart = segment + 1
     end
   end
@@ -218,13 +219,15 @@ local function layout(profile)
 end
 
 ---How far from the road the fine rows reach: the configured width, or more if any surface's mound is wider.
----@return number
+---@return number reach, number widest the widest mound edge
 local function fineWidth()
   local cfg = aLongDrive_config
   local widest = 0
-  for index in ipairs(cfg.surfaces) do
-    local _, _, slopeEnd = layout(aLongDrive_road.getSurfaceProfile(index))
-    widest = math.max(widest, slopeEnd)
+  for biome = 1, aLongDrive_biomes.count() do
+    for surface in ipairs(aLongDrive_biomes.get(biome).surfaces) do
+      local _, _, slopeEnd = layout(aLongDrive_road.getRegionProfile({ biome = biome, surface = surface }))
+      widest = math.max(widest, slopeEnd)
+    end
   end
   return math.max(cfg.terrain.fineWidth, widest + cfg.terrain.cell), widest
 end
@@ -241,7 +244,7 @@ local function terrainHeight(x, y, roadZ, distance, profile)
   local slope = profile.moundHeight * profile.embankment
   local drop = slope > 0 and profile.moundHeight * smoothstep(shoulderEdge, shoulderEdge + slope, distance) or 0
   local hillsStart = shoulderEdge + slope
-  local hills = terrain.relief * reliefNoise(x, y) * smoothstep(hillsStart, hillsStart + terrain.blendDistance, distance)
+  local hills = profile.relief * reliefNoise(x, y, profile.reliefScale) * smoothstep(hillsStart, hillsStart + profile.blendDistance, distance)
   local edgeFade = 1 - smoothstep(terrain.halfWidth * 0.5, terrain.halfWidth, distance)
   return (roadZ - drop + hills) * edgeFade
 end
@@ -345,12 +348,12 @@ end
 ---@param first integer first node of the chunk
 ---@param offset vec3
 ---@param outerCount integer
+---@return table<integer, table> terrain meshes by biome index
 local function buildTerrain(first, offset, outerCount)
   local cfg = aLongDrive_config
   local terrain = cfg.terrain
   local nodes = cfg.chunks.nodes
   local perNode = rowsPerNode()
-  local mesh = newMesh(terrain.material)
 
   -- Near the road: fine rows. Columns run left to right, with the road strip between the middle two.
   local lastFine = (nodes - 1) * perNode
@@ -364,8 +367,6 @@ local function buildTerrain(first, offset, outerCount)
     for c, o in ipairs(mirrored(positive)) do fine[r][c] = finePoint(f, o, profile) end
   end
   local finePoints = shade(fine, 0, lastFine, offset)
-  addSlabFromGrid(mesh, finePoints, 0, lastFine, 1, leftEnd)
-  addSlabFromGrid(mesh, finePoints, 0, lastFine, leftEnd + 1, columnCount)
 
   -- Far from the road: coarse rows, one per node, and wider columns.
   local outerPositive = steps(fineEdge, terrain.halfWidth, terrain.farCell)
@@ -376,9 +377,25 @@ local function buildTerrain(first, offset, outerCount)
     for c, o in ipairs(outerOffsets) do coarse[r][c] = nodePoint(math.max(first + r, 0), o) end
   end
   local coarsePoints = shade(coarse, 0, nodes - 1, offset)
-  addSlabFromGrid(mesh, coarsePoints, 0, nodes - 1, 1, #outerPositive)
-  addSlabFromGrid(mesh, coarsePoints, 0, nodes - 1, #outerPositive + 1, #outerOffsets)
-  return mesh
+
+  -- one mesh per biome, since each has its own ground material; its slabs cover the rows of its stretches
+  local meshes = {}
+  local runStart = 0
+  for segment = 0, nodes - 2 do
+    local biome = aLongDrive_road.getRegion(first + segment).biome
+    local nextBiome = segment + 1 < nodes - 1 and aLongDrive_road.getRegion(first + segment + 1).biome
+    if biome ~= nextBiome then
+      meshes[biome] = meshes[biome] or newMesh(aLongDrive_biomes.get(biome).terrain.material)
+      local mesh = meshes[biome]
+      local fineFrom, fineTo = runStart * perNode, (segment + 1) * perNode
+      addSlabFromGrid(mesh, finePoints, fineFrom, fineTo, 1, leftEnd)
+      addSlabFromGrid(mesh, finePoints, fineFrom, fineTo, leftEnd + 1, columnCount)
+      addSlabFromGrid(mesh, coarsePoints, runStart, segment + 1, 1, #outerPositive)
+      addSlabFromGrid(mesh, coarsePoints, runStart, segment + 1, #outerPositive + 1, #outerOffsets)
+      runStart = segment + 1
+    end
+  end
+  return meshes
 end
 
 ---@class ChunkMesh
@@ -395,10 +412,13 @@ function M.build(chunk, offset)
   fineEdge, widest = fineWidth()
   local outerCount = math.max(1, math.ceil((fineEdge - widest) / cfg.terrain.cell))
   local meshes = {}
-  for surface, mesh in pairs(buildRoad(first, offset)) do
-    meshes[#meshes + 1] = { name = "road_" .. cfg.surfaces[surface].name, mesh = mesh }
+  for _, road in pairs(buildRoad(first, offset)) do
+    local biome = aLongDrive_biomes.def(road.biome).name
+    meshes[#meshes + 1] = { name = "road_" .. biome .. "_" .. aLongDrive_biomes.get(road.biome).surfaces[road.surface].name, mesh = road.mesh }
   end
-  meshes[#meshes + 1] = { name = "terrain", mesh = buildTerrain(first, offset, outerCount) }
+  for biome, mesh in pairs(buildTerrain(first, offset, outerCount)) do
+    meshes[#meshes + 1] = { name = "terrain_" .. aLongDrive_biomes.def(biome).name, mesh = mesh }
+  end
   return meshes
 end
 
