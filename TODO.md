@@ -27,7 +27,10 @@ Rough order within each section. Done items live in git history, not here.
 ## World
 
 - [ ] More dirt detail, then grass
-- [ ] Road markings and a better asphalt
+- [ ] Worn paint and cracked asphalt for the post-apocalyptic look; potholes and sand drifts
+- [ ] More surfaces (gravel, sand, broken asphalt), and a blended transition between surfaces
+- [ ] Wheel ruts on the dirt road; its texture is a plain tint for now
+- [ ] Road crown (camber) so the middle sits slightly above the edges
 - [ ] Smooth the 0.5 m step at the road start
 - [ ] Post-apocalyptic atmosphere: abandoned wrecks, landmarks, day and night, weather
 - [ ] Check the corridor edge where the shaped terrain meets the flat plain

@@ -61,8 +61,54 @@ function M.reset(seed, startX, startY, startZ, heading)
     heading = heading,
     turn = 0,
     heightSeed = (seed % 10007) * 0.73,
+    surfaceRng = (seed * 2654435761 + 97) % 4294967296, -- separate from the road's own random stream
+    surfaceRuns = {},
     nodes = { { x = startX, y = startY, z = startZ } },
   }
+end
+
+---@return number random value in [0, 1) from the surface stream
+local function surfaceRandom()
+  state.surfaceRng = (state.surfaceRng * 1664525 + 1013904223) % 4294967296
+  return state.surfaceRng / 4294967296
+end
+
+---Appends the next stretch of one surface: a different one from the last, picked by weight.
+local function addSurfaceRun()
+  local cfg = aLongDrive_config
+  local list, runs = cfg.surfaces, state.surfaceRuns
+  local previous = runs[#runs]
+
+  local chosen, total = 1, 0
+  for k, surface in ipairs(list) do
+    if not previous or k ~= previous.surface then total = total + surface.weight end
+  end
+  if previous and #list > 1 then
+    local pick = surfaceRandom() * total
+    for k, surface in ipairs(list) do
+      if k ~= previous.surface then
+        pick = pick - surface.weight
+        chosen = k
+        if pick <= 0 then break end
+      end
+    end
+  end
+
+  local surface = list[chosen]
+  local length = surface.minLength + surfaceRandom() * (surface.maxLength - surface.minLength)
+  local first = previous and previous.last + 1 or 0
+  runs[#runs + 1] = { first = first, last = first + math.max(1, math.ceil(length / cfg.road.spacing)) - 1, surface = chosen }
+end
+
+---@param i integer segment index: the stretch from node i to node i + 1
+---@return integer index into config.surfaces
+function M.getSurface(i)
+  local runs = state.surfaceRuns
+  while #runs == 0 or runs[#runs].last < i do addSurfaceRun() end
+  for k = #runs, 1, -1 do
+    if runs[k].first <= i then return runs[k].surface end
+  end
+  return runs[1].surface
 end
 
 ---@param i integer node index, 0-based

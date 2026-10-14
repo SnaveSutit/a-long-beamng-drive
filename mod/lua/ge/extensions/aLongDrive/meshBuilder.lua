@@ -155,18 +155,21 @@ end
 
 ---@param first integer first node of the chunk
 ---@param offset vec3
+---@return table<integer, table> road meshes by surface index
 local function buildRoad(first, offset)
   local cfg = aLongDrive_config
   local halfRoad = cfg.road.width / 2
   local perNode = rowsPerNode()
-  local top = {}
-  for r = 0, (cfg.chunks.nodes - 1) * perNode do
+  local segments = cfg.chunks.nodes - 1
+
+  local rows = {}
+  for r = 0, segments * perNode do
     local f = first + r / perNode
     local center, nx, ny = centerAt(f)
     local v = f * cfg.road.spacing / cfg.road.textureLength
-    top[#top + 1] = {}
+    rows[r] = {}
     for side = -1, 1, 2 do
-      top[#top][#top[#top] + 1] = {
+      rows[r][#rows[r] + 1] = {
         x = center.x + nx * halfRoad * side - offset.x,
         y = center.y + ny * halfRoad * side - offset.y,
         z = center.z,
@@ -175,19 +178,45 @@ local function buildRoad(first, offset)
       }
     end
   end
-  local mesh = newMesh(cfg.road.material)
-  addSlab(mesh, top, #top, 2)
-  return mesh
+
+  -- one closed slab per stretch of segments with the same surface
+  local meshes = {}
+  local runStart = 0
+  for segment = 0, segments - 1 do
+    local surface = aLongDrive_road.getSurface(first + segment)
+    local nextSurface = segment + 1 < segments and aLongDrive_road.getSurface(first + segment + 1)
+    if surface ~= nextSurface then
+      meshes[surface] = meshes[surface] or newMesh(cfg.surfaces[surface].material)
+      local top = {}
+      for r = runStart * perNode, (segment + 1) * perNode do top[#top + 1] = rows[r] end
+      addSlab(meshes[surface], top, #top, 2)
+      runStart = segment + 1
+    end
+  end
+  return meshes
 end
 
----Terrain height at a point, given the road height beside it and its distance from the road.
+
+---Width of the embankment slope beside the shoulder.
+---@return number
+local function embankmentWidth()
+  local road = aLongDrive_config.road
+  return road.moundHeight * road.embankment
+end
+
+---Terrain height at a point, given the road height beside it and its distance from the road. The road bed
+---is a mound: flat out to the shoulder edge, then sloping down to the ground, which rolls on from there.
 ---@return number
 local function terrainHeight(x, y, roadZ, distance)
-  local terrain = aLongDrive_config.terrain
-  local shoulderEdge = aLongDrive_config.road.width / 2 + terrain.shoulder
-  local hills = terrain.relief * reliefNoise(x, y) * smoothstep(shoulderEdge, shoulderEdge + terrain.blendDistance, distance)
+  local cfg = aLongDrive_config
+  local terrain = cfg.terrain
+  local shoulderEdge = cfg.road.width / 2 + terrain.shoulder
+  local slope = embankmentWidth()
+  local drop = slope > 0 and cfg.road.moundHeight * clamp((distance - shoulderEdge) / slope, 0, 1) or 0
+  local hillsStart = shoulderEdge + slope
+  local hills = terrain.relief * reliefNoise(x, y) * smoothstep(hillsStart, hillsStart + terrain.blendDistance, distance)
   local edgeFade = 1 - smoothstep(terrain.halfWidth * 0.5, terrain.halfWidth, distance)
-  return (roadZ + hills) * edgeFade
+  return (roadZ - drop + hills) * edgeFade
 end
 
 ---Where a node's row puts the terrain at a lateral offset: the samples the coarse mesh is made of.
@@ -284,8 +313,9 @@ local function buildTerrain(first, offset)
   local mesh = newMesh(terrain.material)
 
   -- Near the road: fine rows. Columns run left to right: -fineWidth .. -halfRoad, then halfRoad .. fineWidth.
-  local innerPositive = { halfRoad }
-  for _, o in ipairs(steps(shoulderEdge, terrain.fineWidth, terrain.cell)) do innerPositive[#innerPositive + 1] = o end
+  local slopeEnd = math.min(shoulderEdge + embankmentWidth(), terrain.fineWidth)
+  local innerPositive = { halfRoad, shoulderEdge }
+  for _, o in ipairs(steps(slopeEnd, terrain.fineWidth, terrain.cell)) do innerPositive[#innerPositive + 1] = o end
   local innerOffsets = mirrored(innerPositive)
   local lastFine = (nodes - 1) * perNode
   local fine = {}
@@ -313,12 +343,90 @@ local function buildTerrain(first, offset)
   return mesh
 end
 
+---A flat strip along the road between two fractional node indices, at a lateral offset.
+---Open sheets have no collision, so lines never catch a wheel.
+---@param mesh table
+---@param f0 number
+---@param f1 number
+---@param lateral number metres left of the centre line
+---@param width number
+---@param offset vec3
+local function addStrip(mesh, f0, f1, lateral, width, offset)
+  local lift = aLongDrive_config.road.markings.lift
+  local base = #mesh.verts
+  for _, f in ipairs({ f0, f1 }) do
+    local center, nx, ny = centerAt(f)
+    for _, o in ipairs({ lateral - width / 2, lateral + width / 2 }) do
+      mesh.verts[#mesh.verts + 1] = { x = center.x + nx * o - offset.x, y = center.y + ny * o - offset.y, z = center.z + lift }
+    end
+  end
+  for _, v in ipairs({ 0, 2, 3, 0, 3, 1 }) do mesh.faces[#mesh.faces + 1] = { v = base + v, u = 0, n = 0 } end
+end
+
+---Edge lines and a dashed centre line, on the stretches whose surface has markings.
+---@param first integer first node of the chunk
+---@param offset vec3
+---@return table? edge mesh, table? center mesh
+local function buildMarkings(first, offset)
+  local cfg = aLongDrive_config
+  local marks = cfg.road.markings
+  local perNode = rowsPerNode()
+  local segments = cfg.chunks.nodes - 1
+  local edge = newMesh(marks.materials.edge)
+  local center = newMesh(marks.materials.center)
+  for _, mesh in ipairs({ edge, center }) do
+    mesh.uvs, mesh.normals = { { u = 0, v = 0 } }, { { x = 0, y = 0, z = 1 } }
+  end
+
+  local function marked(f)
+    return cfg.surfaces[aLongDrive_road.getSurface(math.floor(f))].markings
+  end
+
+  local edgeLateral = cfg.road.width / 2 - marks.edgeOffset
+  for r = 0, segments * perNode - 1 do
+    local f0, f1 = first + r / perNode, first + (r + 1) / perNode
+    if marked((f0 + f1) / 2) then
+      addStrip(edge, f0, f1, -edgeLateral, marks.lineWidth, offset)
+      addStrip(edge, f0, f1, edgeLateral, marks.lineWidth, offset)
+    end
+  end
+
+  -- dashes are placed by distance along the road, so they carry on across chunk edges
+  local spacing = cfg.road.spacing
+  local startS, endS = first * spacing, (first + segments) * spacing
+  for k = math.floor(startS / marks.dashPeriod), math.floor(endS / marks.dashPeriod) do
+    local from = math.max(k * marks.dashPeriod, startS)
+    local to = math.min(k * marks.dashPeriod + marks.dashLength, endS)
+    local steps = math.max(1, math.ceil((to - from) / 1))
+    for step = 0, steps - 1 do
+      local s0, s1 = from + (to - from) * step / steps, from + (to - from) * (step + 1) / steps
+      if to > from and marked((s0 + s1) / 2 / spacing) then
+        addStrip(center, s0 / spacing, s1 / spacing, 0, marks.lineWidth, offset)
+      end
+    end
+  end
+  return #edge.verts > 0 and edge or nil, #center.verts > 0 and center or nil
+end
+
+---@class ChunkMesh
+---@field name string used to name the scene object
+---@field mesh table
+
 ---@param chunk integer
 ---@param offset vec3 virtual position = world position + offset
----@return {road: table, terrain: table} one mesh per ProceduralMesh object, since only one mesh per object renders
+---@return ChunkMesh[] one mesh per ProceduralMesh object, since only one mesh per object renders
 function M.build(chunk, offset)
-  local first = chunk * (aLongDrive_config.chunks.nodes - 1)
-  return { road = buildRoad(first, offset), terrain = buildTerrain(first, offset) }
+  local cfg = aLongDrive_config
+  local first = chunk * (cfg.chunks.nodes - 1)
+  local meshes = {}
+  for surface, mesh in pairs(buildRoad(first, offset)) do
+    meshes[#meshes + 1] = { name = "road_" .. cfg.surfaces[surface].name, mesh = mesh }
+  end
+  meshes[#meshes + 1] = { name = "terrain", mesh = buildTerrain(first, offset) }
+  local edge, center = buildMarkings(first, offset)
+  if edge then meshes[#meshes + 1] = { name = "edgeLines", mesh = edge } end
+  if center then meshes[#meshes + 1] = { name = "centerLine", mesh = center } end
+  return meshes
 end
 
 return M

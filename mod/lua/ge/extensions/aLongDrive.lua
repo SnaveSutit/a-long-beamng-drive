@@ -20,7 +20,7 @@ local resetNode -- road node the vehicle's reset transform currently points at
 local fuel, fuelCapacity -- litres, reported back by the car
 local fuelPollTimer = 0
 local currentSeed -- seed of the running road
-local chunks = {} -- chunk index -> { road, terrain } ProceduralMesh objects
+local chunks = {} -- chunk index -> ProceduralMesh objects: road per surface, terrain, markings
 local originalPlaneMaterials = {} -- ground plane name -> material
 
 ---@param name string
@@ -38,11 +38,11 @@ end
 
 ---@param c integer
 local function createChunk(c)
-  local meshes = aLongDrive_meshBuilder.build(c, offset)
-  chunks[c] = {
-    createMeshObject("aLongDrive_road_" .. c, meshes.road),
-    createMeshObject("aLongDrive_terrain_" .. c, meshes.terrain),
-  }
+  local objects = {}
+  for _, entry in ipairs(aLongDrive_meshBuilder.build(c, offset)) do
+    objects[#objects + 1] = createMeshObject(string.format("aLongDrive_%s_%d", entry.name, c), entry.mesh)
+  end
+  chunks[c] = objects
   aLongDrive_pickups.spawn(c)
 end
 
@@ -312,8 +312,16 @@ function M.collect()
   end
 end
 
+local MATERIALS_FILE = "/art/aLongDrive/main.materials.json"
+
+---Loading the file registers new materials but doesn't refresh ones the renderer already has,
+---so reload them too, which lets edits to the file show up on the next extension load.
 local function onExtensionLoaded()
-  loadJsonMaterialsFile("/art/aLongDrive/main.materials.json")
+  loadJsonMaterialsFile(MATERIALS_FILE)
+  for name in pairs(jsonReadFile(MATERIALS_FILE) or {}) do
+    local material = scenetree.findObject(name)
+    if material then material:reload() end
+  end
 end
 
 local function onUpdate(dtReal)

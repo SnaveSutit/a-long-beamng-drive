@@ -12,6 +12,10 @@ Work in progress. The prototype runs on the `smallgrid` level.
 3. Get in the car you want to drive, open the pause menu and go to **Mods > A Long Drive**. **New game, random seed** builds a new road from a random seed and puts your car on it. The seed is shown on the page, so a run can be repeated from the Lua console (`~`) with `aLongDrive.start(<seed>)`.
 4. **Stop** removes the road and restores the grid. **Frequent pickups** makes fuel and scrap spawn far more often, for testing; the console equivalent is `aLongDrive.setDevMode(true)`.
 
+## The road
+
+The road bed is a mound: flat out to the shoulder, then an embankment sloping down to the ground. Paved stretches have white edge lines and a dashed yellow centre line. The road switches between surfaces (paved and dirt to start with) in stretches of a random length, set from the seed. Each surface has its own material and ground type, so the car grips differently. Surfaces, markings and the mound are all in `config.lua` (`surfaces`, `road.markings`, `road.moundHeight`).
+
 ## Collect pickups
 
 Pickups are real props beside the road: steel barrels for fuel, cardboard boxes for scrap. Driving past them does nothing. Stop, press `F` to step out of the car (the game's walking mode), walk up to a prop and press `G` to collect it. Fuel goes into the car's tank wherever it is parked. The `G` binding ships with the mod and can be changed in Options > Controls (Gameplay > Collect pickup).

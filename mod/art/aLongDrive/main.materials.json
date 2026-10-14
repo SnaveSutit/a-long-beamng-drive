@@ -27,5 +27,98 @@
       {},
       {}
     ]
+  },
+  "aLongDrive_line_white": {
+    "name": "aLongDrive_line_white",
+    "mapTo": "aLongDrive_line_white",
+    "class": "Material",
+    "version": 1.5,
+    "doubleSided": true,
+    "translucentBlendOp": "None",
+    "Stages": [
+      {
+        "baseColorFactor": [
+          0.9,
+          0.9,
+          0.86,
+          1
+        ],
+        "roughnessFactor": 0.6
+      },
+      {},
+      {},
+      {}
+    ]
+  },
+  "aLongDrive_line_yellow": {
+    "name": "aLongDrive_line_yellow",
+    "mapTo": "aLongDrive_line_yellow",
+    "class": "Material",
+    "version": 1.5,
+    "doubleSided": true,
+    "translucentBlendOp": "None",
+    "Stages": [
+      {
+        "baseColorFactor": [
+          0.85,
+          0.62,
+          0.04,
+          1
+        ],
+        "roughnessFactor": 0.6
+      },
+      {},
+      {},
+      {}
+    ]
+  },
+  "aLongDrive_asphalt": {
+    "name": "aLongDrive_asphalt",
+    "mapTo": "aLongDrive_asphalt",
+    "class": "Material",
+    "groundType": "ASPHALT",
+    "doubleSided": true,
+    "translucentBlendOp": "None",
+    "Stages": [
+      {
+        "colorMap": "/assets/materials/tileable/road/a_asphalt_01_a/asphalt_01_a_d.dds",
+        "specularMap": "/assets/materials/tileable/road/a_asphalt_01_a/asphalt_01_a_s.dds",
+        "diffuseColor": [
+          0.8,
+          0.8,
+          0.8,
+          1
+        ],
+        "useAnisotropic": true
+      },
+      {},
+      {},
+      {}
+    ]
+  },
+  "aLongDrive_roaddirt": {
+    "name": "aLongDrive_roaddirt",
+    "mapTo": "aLongDrive_roaddirt",
+    "class": "Material",
+    "version": 1.5,
+    "groundType": "DIRT",
+    "doubleSided": true,
+    "translucentBlendOp": "None",
+    "Stages": [
+      {
+        "baseColorMap": "/assets/materials/tileable/road/jri_dirt_mesh/jri_dirt_mesh_d.color.dds",
+        "normalMap": "/assets/materials/tileable/road/jri_dirt_mesh/jri_dirt_mesh_n.normal.dds",
+        "roughnessFactor": 0.85,
+        "baseColorFactor": [
+          0.72,
+          0.56,
+          0.38,
+          1
+        ]
+      },
+      {},
+      {},
+      {}
+    ]
   }
 }

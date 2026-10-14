@@ -9,7 +9,23 @@ M.road = {
   startNodesBehind = 2, -- road behind the car when it starts
   width = 8,
   textureLength = 8,
-  material = "a_asphalt_01_a",
+  moundHeight = 0.8, -- the road bed sits this far above the ground beside it
+  embankment = 3, -- metres of slope per metre of drop, from the shoulder down to the ground
+  markings = {
+    edgeOffset = 0.35, -- from the road edge to the middle of the edge line
+    lineWidth = 0.15,
+    dashLength = 3,
+    dashPeriod = 12, -- dash plus gap
+    lift = 0.02, -- above the road surface
+    materials = { edge = "aLongDrive_line_white", center = "aLongDrive_line_yellow" },
+  },
+}
+
+-- The road switches between these as it goes. Each stretch lasts a random length in metres.
+-- The first is where the road starts. markings only apply on paved surfaces.
+M.surfaces = {
+  { name = "paved", material = "aLongDrive_asphalt", markings = true, weight = 1, minLength = 2000, maxLength = 5000 },
+  { name = "dirt", material = "aLongDrive_roaddirt", markings = false, weight = 1, minLength = 800, maxLength = 2000 },
 }
 
 M.hills = {
@@ -66,6 +82,6 @@ M.chunks = {
   behind = 1,
 }
 
-M.shiftDistance = 1500 -- distance from the origin before the car and world are shifted back
+M.shiftDistance = 15000 -- distance from the origin before the car and world are shifted back
 
 return M
