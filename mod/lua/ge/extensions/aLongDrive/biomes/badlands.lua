@@ -5,7 +5,15 @@ return {
   minLength = 5000,
   maxLength = 15000,
   config = {
-    hills = { minHeight = 0.5, maxHeight = 140, wavelength = 420, rollers = 0.5, maxGrade = 0.14 },
+    hills = {
+      minHeight = 0.5, maxHeight = 140, maxGrade = 0.14, maxBend = 0.35, gain = 2.4, variation = 0.4,
+      layers = { { wavelength = 1800, weight = 1 }, { wavelength = 800, weight = 0.9 }, { wavelength = 400, weight = 0.45 }, { wavelength = 250, weight = 0.15 } },
+    },
+    road = { turns = {
+      { name = "gentle", weight = 2, minLength = 300, maxLength = 900, minTurn = 0.01, maxTurn = 0.03 },
+      { name = "sweeping", weight = 3, minLength = 250, maxLength = 800, minTurn = 0.03, maxTurn = 0.06 },
+      { name = "tight", weight = 3, minLength = 90, maxLength = 300, minTurn = 0.06, maxTurn = 0.1 },
+    } },
     terrain = { relief = 35, reliefScale = 90, blendDistance = 40, material = "aLongDrive_dirt_red" },
     surfaces = {
       {

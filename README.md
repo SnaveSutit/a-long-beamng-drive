@@ -16,6 +16,10 @@ Work in progress. The prototype runs on the `smallgrid` level.
 
 The road bed is a mound: flat out to the shoulder, then an embankment sloping down to the ground. Paved stretches have white edge lines and a dashed yellow centre line, painted into the paved road texture (`mod/art/aLongDrive/road_paved.png`). Regenerate it with `bun tools/make-road-texture.ts`; keep the road width and texture length in the script in step with the paved surface in the desert biome.
 
+## Hills and turns
+
+Hill height is layers of smooth noise, from broad hills down to bumps (`hills.layers`: wavelength and weight each), with a slow noise on top that makes some stretches hillier than others (`hills.variation`). The slope of the road may only change by a limited amount per node (`hills.maxBend`), so crests and dips stay rounded; keep layer wavelengths above about 200 m, since nodes are 30 m apart. Turns come from kinds of curve (`road.turns`: straight, gentle, sweeping, tight), each with its own length and turn rate, picked by weight, and a new curve often bends the opposite way, which makes S-curves. A biome can replace either.
+
 ## Biomes
 
 The road passes through biomes, each a stretch of random length picked from the seed. A biome overrides parts of the base config in `mod/lua/ge/extensions/aLongDrive/config.lua`: its road surfaces (and each surface's `width`, `moundHeight`, `shoulder` and `embankment`), hills, the terrain's relief and ground material, and its pickup rates and props. Tables merge key by key over the base; lists such as `surfaces` and `pickupProps` are replaced whole.

@@ -3,9 +3,8 @@
 
 local M = {}
 
-local TURN_MEMORY = 0.92 -- how much of the previous turn rate carries over
-local ROLLER_SCALE = 0.35 -- rollers are this fraction of the hill wavelength
-local CONTRAST = 1.7 -- smooth noise hugs the middle, so stretch it to use the height range
+local FOLLOW = 0.4 -- how hard the road chases its target height each node; lower means a softer, laggier ride
+local VARIATION_WAVELENGTH = 3500 -- the slow noise that makes some stretches hillier than others
 local EASE_IN_DISTANCE = 400 -- the road starts at ground level and eases into the hills over this distance
 
 local ROAD_KEYS = { "width", "moundHeight", "shoulder", "embankment" }
@@ -24,31 +23,40 @@ local function clamp(v, lo, hi)
 end
 
 ---@param i integer
+---@param layer number which noise layer, so layers do not repeat each other
 ---@return number pseudo-random value in [0, 1) for a lattice point of the height noise
-local function latticeValue(i)
-  local v = math.sin(i * 127.1 + state.heightSeed) * 43758.5453
+local function latticeValue(i, layer)
+  local v = math.sin(i * 127.1 + layer * 311.7 + state.heightSeed) * 43758.5453
   return v - math.floor(v)
 end
 
 ---@param x number
----@return number smooth 1D noise in [0, 1)
-local function smoothNoise(x)
+---@param layer number
+---@return number smooth 1D noise in [0, 1). The quintic fade keeps the curvature continuous, so no lumps at the lattice points.
+local function smoothNoise(x, layer)
   local i = math.floor(x)
   local f = x - i
-  local u = f * f * (3 - 2 * f)
-  local a = latticeValue(i)
-  return a + (latticeValue(i + 1) - a) * u
+  local u = f * f * f * (f * (f * 6 - 15) + 10)
+  local a = latticeValue(i, layer)
+  return a + (latticeValue(i + 1, layer) - a) * u
 end
 
----Target road height at a distance along the road for one biome's hills: big hills with shorter rollers on top.
+---Target road height at a distance along the road for one biome's hills: layers of noise, long and short,
+---with a slow noise making some stretches hillier than others. Saturates smoothly at the height limits.
 ---@param hills table that biome's hills config
 ---@param distance number metres from the start
 ---@return number
 local function heightFor(hills, distance)
-  local big = smoothNoise(distance / hills.wavelength)
-  local rollers = smoothNoise(distance / (hills.wavelength * ROLLER_SCALE) + 31.7)
-  local mix = (1 - hills.rollers) * big + hills.rollers * rollers
-  local fraction = clamp(0.5 + (mix - 0.5) * CONTRAST, 0, 1)
+  local sum, total = 0, 0
+  for k, layer in ipairs(hills.layers) do
+    sum = sum + (smoothNoise(distance / layer.wavelength, k) - 0.5) * layer.weight
+    total = total + layer.weight
+  end
+  local deviation = sum / total * 2 -- about -1..1, usually within +-0.5
+
+  local slow = smoothNoise(distance / VARIATION_WAVELENGTH, 97)
+  local amplitude = 1 - hills.variation + hills.variation * slow
+  local fraction = 0.5 + 0.5 * math.tanh(hills.gain * deviation * amplitude)
   return hills.minHeight + (hills.maxHeight - hills.minHeight) * fraction
 end
 
@@ -62,6 +70,10 @@ function M.reset(seed, startX, startY, startZ, heading)
     rng = seed % 4294967296,
     heading = heading,
     turn = 0,
+    slope = 0, -- metres climbed per node
+    turnSign = 1,
+    turnLeft = 0, -- nodes left in the current stretch of curve
+    turnTarget = 0,
     heightSeed = (seed % 10007) * 0.73,
     regionRng = (seed * 2654435761 + 97) % 4294967296, -- separate from the road's own random stream
     regions = {},
@@ -213,24 +225,43 @@ function M.getBiome(f)
   return state.regions[regionIndexFor(math.floor(f))].biome
 end
 
----Height and steepest allowed grade for the node at index i, blending the hills of two biomes across a boundary.
+---Target height, steepest grade and the most the slope may change per node, for the node at index i.
+---Blends the hills of two biomes across a boundary.
 ---@param i integer node index
 ---@param spacing number
----@return number height, number maxGrade
+---@return number height, number maxGrade, number maxBend
 local function hillsAt(i, spacing)
   local distance = i * spacing
   local region, neighbour, share = blendAt(i)
   local hills = aLongDrive_biomes.get(region.biome).hills
-  local height, grade = heightFor(hills, distance), hills.maxGrade
+  local height, grade, bend = heightFor(hills, distance), hills.maxGrade, hills.maxBend
   if neighbour and neighbour.biome ~= region.biome then
     local other = aLongDrive_biomes.get(neighbour.biome).hills
     height = height + (heightFor(other, distance) - height) * share
     grade = grade + (other.maxGrade - grade) * share
+    bend = bend + (other.maxBend - bend) * share
   end
   local ease = clamp(distance / EASE_IN_DISTANCE, 0, 1)
   ease = ease * ease * (3 - 2 * ease)
   local floor = hills.minHeight
-  return floor + (height - floor) * ease, grade
+  return floor + (height - floor) * ease, grade, bend
+end
+
+---Starts the next stretch of curve: a kind picked by weight, a length and a turn rate within the kind's range.
+---@param turns table[] the biome's turn kinds
+local function startTurnStretch(turns)
+  local spacing = aLongDrive_config.road.spacing
+  local total = 0
+  for _, kind in ipairs(turns) do total = total + kind.weight end
+  local pick, chosen = nextRandom() * total, turns[1]
+  for _, kind in ipairs(turns) do
+    chosen = kind
+    pick = pick - kind.weight
+    if pick <= 0 then break end
+  end
+  if chosen.maxTurn > 0.004 and nextRandom() < aLongDrive_config.road.turnFlip then state.turnSign = -state.turnSign end
+  state.turnLeft = math.max(1, math.ceil((chosen.minLength + nextRandom() * (chosen.maxLength - chosen.minLength)) / spacing))
+  state.turnTarget = state.turnSign * (chosen.minTurn + nextRandom() * (chosen.maxTurn - chosen.minTurn))
 end
 
 ---@param i integer node index, 0-based
@@ -240,14 +271,24 @@ function M.getNode(i)
   local nodes = state.nodes
   while #nodes <= i do
     local last = nodes[#nodes]
-    state.turn = clamp(state.turn * TURN_MEMORY + (nextRandom() - 0.5) * 0.04, -cfg.road.maxTurn, cfg.road.maxTurn)
+    if state.turnLeft <= 0 then startTurnStretch(aLongDrive_biomes.get(M.getBiome(#nodes)).road.turns) end
+    state.turnLeft = state.turnLeft - 1
+    local wobble = (nextRandom() - 0.5) * cfg.road.turnWobble
+    state.turn = clamp(state.turn + (state.turnTarget - state.turn) * cfg.road.turnResponse + wobble, -cfg.road.maxTurn, cfg.road.maxTurn)
     state.heading = state.heading + state.turn
-    local target, grade = hillsAt(#nodes, cfg.road.spacing)
+
+    local target, grade, bend = hillsAt(#nodes, cfg.road.spacing)
     local maxStep = grade * cfg.road.spacing
+    -- The slope chases a slope that would reach the target, but may only change by a limited amount per node.
+    -- That keeps crests and dips rounded, however suddenly the target moves, and the climb within the grade limit.
+    local wanted = clamp((target - last.z) * FOLLOW, -maxStep, maxStep)
+    local limit = maxStep * bend
+    state.slope = clamp(state.slope + clamp(wanted - state.slope, -limit, limit), -maxStep, maxStep)
+    local step = state.slope
     nodes[#nodes + 1] = {
       x = last.x + math.cos(state.heading) * cfg.road.spacing,
       y = last.y + math.sin(state.heading) * cfg.road.spacing,
-      z = clamp(target, last.z - maxStep, last.z + maxStep),
+      z = last.z + step,
     }
   end
   return nodes[i + 1]

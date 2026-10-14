@@ -14,7 +14,18 @@ local M = {}
 M.road = {
   spacing = 30, -- between nodes
   meshStep = 5, -- target metres between mesh rows; smaller is smoother and heavier
-  maxTurn = 0.1, -- radians per node
+  maxTurn = 0.1, -- radians per node; no turn is ever sharper than this
+  turnResponse = 0.3, -- how quickly the road swings onto a new turn rate, per node
+  turnWobble = 0.006, -- small random wander on top of the turns
+  turnFlip = 0.6, -- chance a new curve bends the opposite way, which makes S-curves
+  -- Kinds of curve, picked by weight. Lengths are metres; turns are radians per node (30 m), a gentle 0.02 is a
+  -- 1.5 km radius and 0.1 is a 300 m one. A biome can replace the whole list.
+  turns = {
+    { name = "straight", weight = 2, minLength = 300, maxLength = 1500, minTurn = 0, maxTurn = 0.004 },
+    { name = "gentle", weight = 3, minLength = 400, maxLength = 1400, minTurn = 0.008, maxTurn = 0.025 },
+    { name = "sweeping", weight = 2, minLength = 300, maxLength = 1000, minTurn = 0.025, maxTurn = 0.055 },
+    { name = "tight", weight = 1, minLength = 90, maxLength = 300, minTurn = 0.06, maxTurn = 0.1 },
+  },
   startNodesBehind = 20, -- road behind the car when it starts
   width = 8,
   moundHeight = 0.5, -- the road bed sits this far above the ground beside it
@@ -48,9 +59,20 @@ M.surfaces = {
 M.hills = {
   minHeight = 0.5, -- keeps the road clear of the flat plain beneath it
   maxHeight = 100, -- road stays between minHeight and this above the plain
-  wavelength = 800, -- metres between the crests of the main hills
-  rollers = 0.3, -- 0 to 1: how much of the height comes from shorter rollers on top of the hills
+  -- Layers of noise added together, from broad hills down to bumps. wavelength is metres between crests;
+  -- weight is how much of the shape the layer makes up.
+  layers = {
+    { wavelength = 2600, weight = 1 },
+    { wavelength = 1100, weight = 0.8 },
+    { wavelength = 520, weight = 0.4 },
+    { wavelength = 240, weight = 0.12 },
+  },
+  -- Keep wavelengths above about 200 m: nodes are 30 m apart, and a shorter layer can't be drawn smoothly, so it
+  -- shows up as lumps.
+  gain = 3, -- how much of the height range the layers use; higher means more of the road sits near the limits
+  variation = 0.6, -- 0 to 1: how much some stretches are hillier than others
   maxGrade = 0.1, -- rise over run; the steepest the road is allowed to get
+  maxBend = 0.3, -- 0 to 1: the most the slope can change per node, as a fraction of maxGrade. Lower means rounder crests
 }
 
 M.terrain = {
