@@ -46,17 +46,17 @@
       <BngSwitch :model-value="state.devMode" :disabled="loading" @update:model-value="setDevMode" />
     </section>
 
-    <section class="ald-row">
+    <section v-for="surface in state.surfaces" :key="surface.name" class="ald-row">
       <div class="ald-copy">
-        <div class="ald-label">Shoulder width</div>
+        <div class="ald-label">Shoulder width: {{ surface.name }}</div>
         <div class="ald-desc">
-          Flat ground beside the road before the embankment starts. A running road is rebuilt in place. For a lasting
-          change, set <code>road.shoulder</code> in config.lua.
+          Flat ground beside the {{ surface.name }} road before the embankment starts. A running road is rebuilt in
+          place. For a lasting change, set <code>road.shoulder</code> on the surface in config.lua.
         </div>
       </div>
       <BngSlider
         class="ald-slider"
-        :model-value="state.shoulder"
+        :model-value="surface.shoulder"
         :min="0"
         :max="state.maxShoulder"
         :step="0.5"
@@ -64,7 +64,7 @@
         :disabled="loading"
         with-input
         unit=" m"
-        @update:model-value="setShoulder"
+        @update:model-value="value => setShoulder(surface, value)"
       />
     </section>
 
@@ -98,7 +98,7 @@ const error = ref("")
 let settingsCard = null
 let pollTimer = null
 
-const state = reactive({ active: false, seed: null, devMode: false, walking: false, shoulder: 6, maxShoulder: 12 })
+const state = reactive({ active: false, seed: null, devMode: false, walking: false, maxShoulder: 12, surfaces: [] })
 
 function runLua(code) {
   return new Promise(resolve => api.engineLua(code, resolve))
@@ -162,10 +162,10 @@ function reloadUi() {
   runLua("reloadUI()")
 }
 
-function setShoulder(value) {
-  state.shoulder = value
+function setShoulder(surface, value) {
+  surface.shoulder = value
   error.value = ""
-  runLua(`aLongDrive.setShoulder(${Number(value)})`).catch(() => {
+  runLua(`aLongDrive.setShoulder(${Number(value)}, ${JSON.stringify(surface.name)})`).catch(() => {
     error.value = "That change could not be applied."
   })
 }

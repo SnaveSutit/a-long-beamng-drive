@@ -160,7 +160,6 @@ end
 ---@return table<integer, table> road meshes by surface index
 local function buildRoad(first, offset)
   local cfg = aLongDrive_config
-  local halfRoad = cfg.road.width / 2
   local perNode = rowsPerNode()
   local segments = cfg.chunks.nodes - 1
 
@@ -168,6 +167,7 @@ local function buildRoad(first, offset)
   for r = 0, segments * perNode do
     local f = first + r / perNode
     local center, nx, ny = centerAt(f)
+    local halfRoad = aLongDrive_road.getProfile(f).width / 2
     rows[r] = { f = f }
     for side = -1, 1, 2 do
       rows[r][#rows[r] + 1] = {
@@ -205,30 +205,41 @@ local function buildRoad(first, offset)
 end
 
 
----Width of the embankment slope beside the shoulder.
----@return number
-local function embankmentWidth()
-  local road = aLongDrive_config.road
-  return road.moundHeight * road.embankment
+local MIN_SPACING = 0.25 -- columns never sit closer than this, so a zero shoulder or mound makes no degenerate triangles
+
+---Where the parts of a cross-section start, as distances from the road centre.
+---@param profile {width: number, moundHeight: number, shoulder: number, embankment: number}
+---@return number halfRoad, number shoulderEdge, number slopeEnd
+local function layout(profile)
+  local halfRoad = profile.width / 2
+  local shoulderEdge = halfRoad + math.max(profile.shoulder, MIN_SPACING)
+  local slopeEnd = shoulderEdge + math.max(profile.moundHeight * profile.embankment, MIN_SPACING * SLOPE_DIVISIONS)
+  return halfRoad, shoulderEdge, slopeEnd
 end
 
----How far from the road the fine rows reach: the configured width, or more if the mound is wider.
+---How far from the road the fine rows reach: the configured width, or more if any surface's mound is wider.
 ---@return number
 local function fineWidth()
   local cfg = aLongDrive_config
-  local moundEdge = cfg.road.width / 2 + cfg.road.shoulder + embankmentWidth()
-  return math.max(cfg.terrain.fineWidth, moundEdge + cfg.terrain.cell)
+  local widest = 0
+  for index in ipairs(cfg.surfaces) do
+    local _, _, slopeEnd = layout(aLongDrive_road.getSurfaceProfile(index))
+    widest = math.max(widest, slopeEnd)
+  end
+  return math.max(cfg.terrain.fineWidth, widest + cfg.terrain.cell), widest
 end
+
+local fineEdge = 0 -- set at the start of each build
 
 ---Terrain height at a point, given the road height beside it and its distance from the road. The road bed
 ---is a mound: flat out to the shoulder edge, then an S-curve down to the ground, which rolls on from there.
+---@param profile table the road's cross-section here
 ---@return number
-local function terrainHeight(x, y, roadZ, distance)
-  local cfg = aLongDrive_config
-  local terrain = cfg.terrain
-  local shoulderEdge = cfg.road.width / 2 + cfg.road.shoulder
-  local slope = embankmentWidth()
-  local drop = slope > 0 and cfg.road.moundHeight * smoothstep(shoulderEdge, shoulderEdge + slope, distance) or 0
+local function terrainHeight(x, y, roadZ, distance, profile)
+  local terrain = aLongDrive_config.terrain
+  local shoulderEdge = profile.width / 2 + profile.shoulder
+  local slope = profile.moundHeight * profile.embankment
+  local drop = slope > 0 and profile.moundHeight * smoothstep(shoulderEdge, shoulderEdge + slope, distance) or 0
   local hillsStart = shoulderEdge + slope
   local hills = terrain.relief * reliefNoise(x, y) * smoothstep(hillsStart, hillsStart + terrain.blendDistance, distance)
   local edgeFade = 1 - smoothstep(terrain.halfWidth * 0.5, terrain.halfWidth, distance)
@@ -242,24 +253,24 @@ end
 local function nodePoint(i, o)
   local center, nx, ny = centerAt(i)
   local x, y = center.x + nx * o, center.y + ny * o
-  return { x = x, y = y, z = terrainHeight(x, y, center.z, math.abs(o)) }
+  return { x = x, y = y, z = terrainHeight(x, y, center.z, math.abs(o), aLongDrive_road.getProfile(i)) }
 end
 
 ---Fine rows: follows the smooth centre line near the road, and eases onto the straight lines between
----node samples towards fineWidth, so its edge meets the coarse mesh with no crack.
+---node samples towards the edge of the fine zone, so its edge meets the coarse mesh with no crack.
 ---@param f number fractional node index
 ---@param o number lateral offset
+---@param profile table the road's cross-section at f
 ---@return table { x, y, z }
-local function finePoint(f, o)
-  local terrain = aLongDrive_config.terrain
-  local shoulderEdge = aLongDrive_config.road.width / 2 + aLongDrive_config.road.shoulder
+local function finePoint(f, o, profile)
+  local _, shoulderEdge = layout(profile)
   local distance = math.abs(o)
 
   local center, nx, ny = centerAt(f)
   local x, y = center.x + nx * o, center.y + ny * o
-  local z = terrainHeight(x, y, center.z, distance)
+  local z = terrainHeight(x, y, center.z, distance, profile)
 
-  local w = smoothstep(shoulderEdge, fineWidth(), distance)
+  local w = smoothstep(shoulderEdge, fineEdge, distance)
   if w == 0 then return { x = x, y = y, z = z } end
   local i = math.floor(f)
   local t = f - i
@@ -317,37 +328,44 @@ local function addSlabFromGrid(mesh, points, firstRow, lastRow, fromCol, toCol)
   addSlab(mesh, slab, #slab, toCol - fromCol + 1)
 end
 
+---Positive lateral offsets of the fine columns for one cross-section. Every cross-section has the same
+---number of columns, so the rows form a grid even where the road's shape changes.
+---@param profile table
+---@param outerCount integer columns between the end of the slope and the edge of the fine zone
+---@return number[]
+local function fineColumns(profile, outerCount)
+  local halfRoad, shoulderEdge, slopeEnd = layout(profile)
+  local list = { halfRoad, shoulderEdge }
+  for k = 1, SLOPE_DIVISIONS - 1 do list[#list + 1] = shoulderEdge + (slopeEnd - shoulderEdge) * k / SLOPE_DIVISIONS end
+  list[#list + 1] = slopeEnd
+  for j = 1, outerCount do list[#list + 1] = slopeEnd + (fineEdge - slopeEnd) * j / outerCount end
+  return list
+end
+
 ---@param first integer first node of the chunk
 ---@param offset vec3
-local function buildTerrain(first, offset)
+---@param outerCount integer
+local function buildTerrain(first, offset, outerCount)
   local cfg = aLongDrive_config
   local terrain = cfg.terrain
-  local halfRoad = cfg.road.width / 2
-  local shoulderEdge = halfRoad + cfg.road.shoulder
   local nodes = cfg.chunks.nodes
   local perNode = rowsPerNode()
   local mesh = newMesh(terrain.material)
 
-  -- Near the road: fine rows. Columns run left to right: -fineWidth .. -halfRoad, then halfRoad .. fineWidth.
-  local fineEdge = fineWidth()
-  local slopeEnd = math.min(shoulderEdge + embankmentWidth(), fineEdge)
-  local innerPositive = { halfRoad, shoulderEdge }
-  if slopeEnd > shoulderEdge then
-    for k = 1, SLOPE_DIVISIONS - 1 do innerPositive[#innerPositive + 1] = shoulderEdge + (slopeEnd - shoulderEdge) * k / SLOPE_DIVISIONS end
-  end
-  for _, o in ipairs(steps(slopeEnd, fineEdge, terrain.cell)) do innerPositive[#innerPositive + 1] = o end
-  local innerOffsets = mirrored(innerPositive)
+  -- Near the road: fine rows. Columns run left to right, with the road strip between the middle two.
   local lastFine = (nodes - 1) * perNode
-  local fine = {}
+  local fine, leftEnd, columnCount = {}, nil, nil
   for r = -1, lastFine + 1 do
+    local f = math.max(first + r / perNode, 0)
+    local profile = aLongDrive_road.getProfile(f)
+    local positive = fineColumns(profile, outerCount)
+    leftEnd, columnCount = #positive, #positive * 2
     fine[r] = {}
-    local f = first + r / perNode
-    for c, o in ipairs(innerOffsets) do fine[r][c] = finePoint(math.max(f, 0), o) end
+    for c, o in ipairs(mirrored(positive)) do fine[r][c] = finePoint(f, o, profile) end
   end
   local finePoints = shade(fine, 0, lastFine, offset)
-  local leftEnd, rightStart = #innerPositive, #innerPositive + 1 -- the road strip sits between them
   addSlabFromGrid(mesh, finePoints, 0, lastFine, 1, leftEnd)
-  addSlabFromGrid(mesh, finePoints, 0, lastFine, rightStart, #innerOffsets)
+  addSlabFromGrid(mesh, finePoints, 0, lastFine, leftEnd + 1, columnCount)
 
   -- Far from the road: coarse rows, one per node, and wider columns.
   local outerPositive = steps(fineEdge, terrain.halfWidth, terrain.farCell)
@@ -373,11 +391,14 @@ end
 function M.build(chunk, offset)
   local cfg = aLongDrive_config
   local first = chunk * (cfg.chunks.nodes - 1)
+  local widest
+  fineEdge, widest = fineWidth()
+  local outerCount = math.max(1, math.ceil((fineEdge - widest) / cfg.terrain.cell))
   local meshes = {}
   for surface, mesh in pairs(buildRoad(first, offset)) do
     meshes[#meshes + 1] = { name = "road_" .. cfg.surfaces[surface].name, mesh = mesh }
   end
-  meshes[#meshes + 1] = { name = "terrain", mesh = buildTerrain(first, offset) }
+  meshes[#meshes + 1] = { name = "terrain", mesh = buildTerrain(first, offset, outerCount) }
   return meshes
 end
 

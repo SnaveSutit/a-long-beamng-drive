@@ -248,8 +248,15 @@ function M.rebuild()
 end
 
 ---@param width number metres of flat ground beside the road edge
-function M.setShoulder(width)
-  aLongDrive_config.road.shoulder = math.max(0, math.min(width, MAX_SHOULDER))
+---@param surfaceName? string one surface, or every surface if omitted
+function M.setShoulder(width, surfaceName)
+  width = math.max(0, math.min(width, MAX_SHOULDER))
+  for _, def in ipairs(aLongDrive_config.surfaces) do
+    if not surfaceName or def.name == surfaceName then
+      def.road = def.road or {}
+      def.road.shoulder = width
+    end
+  end
   M.rebuild()
 end
 
@@ -267,15 +274,19 @@ function M.newGame()
 end
 
 ---For the settings page.
----@return {active: boolean, seed: integer?, devMode: boolean, walking: boolean, shoulder: number, maxShoulder: number}
+---@return {active: boolean, seed: integer?, devMode: boolean, walking: boolean, maxShoulder: number, surfaces: {name: string, shoulder: number}[]}
 function M.getState()
+  local surfaces = {}
+  for index, def in ipairs(aLongDrive_config.surfaces) do
+    surfaces[#surfaces + 1] = { name = def.name, shoulder = aLongDrive_road.getSurfaceProfile(index).shoulder }
+  end
   return {
-    shoulder = aLongDrive_config.road.shoulder,
-    maxShoulder = MAX_SHOULDER,
     active = active,
     seed = active and currentSeed or nil,
     devMode = aLongDrive_config.devMode,
     walking = isWalking(),
+    maxShoulder = MAX_SHOULDER,
+    surfaces = surfaces,
   }
 end
 

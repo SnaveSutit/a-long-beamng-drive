@@ -100,15 +100,66 @@ local function addSurfaceRun()
   runs[#runs + 1] = { first = first, last = first + math.max(1, math.ceil(length / cfg.road.spacing)) - 1, surface = chosen }
 end
 
----@param i integer segment index: the stretch from node i to node i + 1
----@return integer index into config.surfaces
-function M.getSurface(i)
+---Index of the run covering segment i, generating runs as far as needed.
+---@param i integer segment index
+---@return integer
+local function runIndexFor(i)
   local runs = state.surfaceRuns
   while #runs == 0 or runs[#runs].last < i do addSurfaceRun() end
   for k = #runs, 1, -1 do
-    if runs[k].first <= i then return runs[k].surface end
+    if runs[k].first <= i then return k end
   end
-  return runs[1].surface
+  return 1
+end
+
+---@param i integer segment index: the stretch from node i to node i + 1
+---@return integer index into config.surfaces
+function M.getSurface(i)
+  return state.surfaceRuns[runIndexFor(i)].surface
+end
+
+local PROFILE_KEYS = { "width", "moundHeight", "shoulder", "embankment" }
+
+---A surface's own road settings: what its `road` table sets, and the shared defaults for the rest.
+---@param index integer index into config.surfaces
+---@return {width: number, moundHeight: number, shoulder: number, embankment: number}
+function M.getSurfaceProfile(index)
+  local cfg = aLongDrive_config
+  local overrides = cfg.surfaces[index].road or {}
+  local profile = {}
+  for _, key in ipairs(PROFILE_KEYS) do profile[key] = overrides[key] or cfg.road[key] end
+  return profile
+end
+
+---The road's cross-section settings at a position along it. Within a surface they are that surface's own;
+---around a boundary they ease from one surface's to the other's over config.surfaceTransition metres.
+---@param f number fractional node index
+---@return {width: number, moundHeight: number, shoulder: number, embankment: number}
+function M.getProfile(f)
+  local cfg = aLongDrive_config
+  local k = runIndexFor(math.floor(f))
+  local runs = state.surfaceRuns
+  local run = runs[k]
+  local profile = M.getSurfaceProfile(run.surface)
+
+  local half = cfg.surfaceTransition / cfg.road.spacing / 2 -- nodes either side of a boundary
+  if half <= 0 then return profile end
+  local fromStart, fromEnd = f - run.first, run.last + 1 - f
+  local neighbour, distance
+  if fromStart <= fromEnd then
+    neighbour, distance = runs[k - 1], fromStart
+  else
+    runIndexFor(run.last + 1) -- make sure the next run exists
+    neighbour, distance = runs[k + 1], fromEnd
+  end
+  if not neighbour or distance >= half then return profile end
+
+  -- the neighbour's share is half at the boundary, so both sides agree there, and fades out smoothly
+  local t = distance / half
+  local share = 0.5 * (1 - t * t * (3 - 2 * t))
+  local other = M.getSurfaceProfile(neighbour.surface)
+  for _, key in ipairs(PROFILE_KEYS) do profile[key] = profile[key] + (other[key] - profile[key]) * share end
+  return profile
 end
 
 ---@param i integer node index, 0-based

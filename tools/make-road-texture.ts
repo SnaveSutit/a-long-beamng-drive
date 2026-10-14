@@ -1,6 +1,6 @@
 // Generates the paved road texture: dark asphalt grain with the lane markings painted in.
 // The texture covers the full road width across (u) and TEXTURE_LENGTH metres along (v), and tiles along the road.
-// Keep ROAD_WIDTH and TEXTURE_LENGTH in step with config.lua (road.width and surfaces[paved].textureLength).
+// Keep ROAD_WIDTH and TEXTURE_LENGTH in step with config.lua (the paved surface's road.width and textureLength).
 //
 // Run: bun tools/make-road-texture.ts
 
