@@ -52,7 +52,11 @@ local function placementsFor(chunk)
     local along = random() * (cfg.chunks.nodes - 1)
     local i = firstNode + math.floor(along)
     local side = random() < 0.5 and -1 or 1
-    local lateral = side * (cfg.pickups.lateralMin + random() * (cfg.pickups.lateralMax - cfg.pickups.lateralMin))
+    -- on the flat shoulder, clear of both edges; a shoulder too narrow for that gets them down its middle
+    local roadEdge, margin = cfg.road.width / 2, cfg.pickups.shoulderMargin
+    local nearest, farthest = roadEdge + margin, roadEdge + cfg.road.shoulder - margin
+    if farthest < nearest then nearest, farthest = roadEdge + cfg.road.shoulder / 2, roadEdge + cfg.road.shoulder / 2 end
+    local lateral = side * (nearest + random() * (farthest - nearest))
     local p = roadPoint(aLongDrive_road.getNode(i), aLongDrive_road.getNode(i + 1), along % 1, lateral)
     slots = slots + 1
     local prop = props[kind][1 + math.floor(random() * #props[kind])]

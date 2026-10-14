@@ -48,6 +48,28 @@
 
     <section class="ald-row">
       <div class="ald-copy">
+        <div class="ald-label">Shoulder width</div>
+        <div class="ald-desc">
+          Flat ground beside the road before the embankment starts. A running road is rebuilt in place. For a lasting
+          change, set <code>road.shoulder</code> in config.lua.
+        </div>
+      </div>
+      <BngSlider
+        class="ald-slider"
+        :model-value="state.shoulder"
+        :min="0"
+        :max="state.maxShoulder"
+        :step="0.5"
+        :debounce="300"
+        :disabled="loading"
+        with-input
+        unit=" m"
+        @update:model-value="setShoulder"
+      />
+    </section>
+
+    <section class="ald-row">
+      <div class="ald-copy">
         <div class="ald-label">Reload</div>
         <div class="ald-desc">
           Reload mod picks up edits to the Lua code, config and materials, and restarts a running road with the same
@@ -64,7 +86,7 @@
 
 <script setup>
 import { onMounted, onUnmounted, reactive, ref } from "vue"
-import { BngButton, BngSwitch } from "@/common/components/base"
+import { BngButton, BngSlider, BngSwitch } from "@/common/components/base"
 import { useBridge } from "@/bridge"
 
 const POLL_MS = 500
@@ -76,7 +98,7 @@ const error = ref("")
 let settingsCard = null
 let pollTimer = null
 
-const state = reactive({ active: false, seed: null, devMode: false, walking: false })
+const state = reactive({ active: false, seed: null, devMode: false, walking: false, shoulder: 6, maxShoulder: 12 })
 
 function runLua(code) {
   return new Promise(resolve => api.engineLua(code, resolve))
@@ -138,6 +160,14 @@ async function reloadMod() {
 
 function reloadUi() {
   runLua("reloadUI()")
+}
+
+function setShoulder(value) {
+  state.shoulder = value
+  error.value = ""
+  runLua(`aLongDrive.setShoulder(${Number(value)})`).catch(() => {
+    error.value = "That change could not be applied."
+  })
 }
 
 function setDevMode(value) {
@@ -231,6 +261,11 @@ onUnmounted(() => {
 .ald-buttons {
   display: flex;
   gap: 0.25rem;
+}
+
+.ald-slider {
+  flex: 0 0 16rem;
+  max-width: 16rem;
 }
 
 .ald-label {

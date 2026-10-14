@@ -7,6 +7,7 @@ local RESET_HEIGHT = 0.5 -- reset position above the road surface
 -- unload order for a reload: the extension first, then what it depends on
 local MODULES = { "aLongDrive", "aLongDrive_hud", "aLongDrive_pickups", "aLongDrive_meshBuilder", "aLongDrive_road", "aLongDrive_config" }
 local UNPACKED_MOD = "/mods/unpacked/a_long_drive/"
+local MAX_SHOULDER = 12
 local TELEPORT_GRACE_FRAMES = 3
 local ORBIT_WORLD_POSITIONS = { "camLastTargetPos", "camLastTargetPos2", "camLastPos", "camLastPos2", "camLastPosPerp", "preResetPos" }
 
@@ -192,21 +193,11 @@ local function randomSeed()
   return math.floor(os.time() * 1000 + os.clock() * 1000) % 1000000000 + 1
 end
 
----@param seed? number random if omitted
----@return boolean ok, string? reason
-function M.start(seed)
-  local veh = be:getPlayerVehicle(0)
-  if not veh then
-    log("W", "aLongDrive", "No player vehicle, not starting")
-    return false, "No vehicle to drive. Spawn a car first."
-  end
-  if isWalking() then
-    log("W", "aLongDrive", "Get in a car before starting")
-    return false, "Get in a car first."
-  end
-  M.stop()
+---Sets everything up for a new road. May throw; M.start catches that.
+---@param veh table the player's vehicle
+---@param seed integer
+local function begin(veh, seed)
   carId = veh:getId()
-  seed = seed or randomSeed()
   currentSeed = seed
   local pos, dir = veh:getPosition(), veh:getDirectionVector()
   local heading = math.atan2(dir.y, dir.x)
@@ -225,7 +216,41 @@ function M.start(seed)
   local roadPos, roadRot = roadPose(carRoadNode)
   veh:setPositionRotation(roadPos.x, roadPos.y, roadPos.z, roadRot.x, roadRot.y, roadRot.z, roadRot.w)
   updateResetTransform(veh)
+end
+
+---@param seed? number random if omitted
+---@return boolean ok, string? reason
+function M.start(seed)
+  local veh = be:getPlayerVehicle(0)
+  if not veh then
+    log("W", "aLongDrive", "No player vehicle, not starting")
+    return false, "No vehicle to drive. Spawn a car first."
+  end
+  if isWalking() then
+    log("W", "aLongDrive", "Get in a car before starting")
+    return false, "Get in a car first."
+  end
+  M.stop()
+  local ok, err = xpcall(begin, debug.traceback, veh, seed or randomSeed())
+  if not ok then
+    log("E", "aLongDrive", "Could not start: " .. tostring(err))
+    pcall(M.stop)
+    return false, "Starting failed. Check the log."
+  end
   return true
+end
+
+---Builds the chunks again from the current config, without moving the car or the road.
+function M.rebuild()
+  if not active then return end
+  clearChunks()
+  updateChunks()
+end
+
+---@param width number metres of flat ground beside the road edge
+function M.setShoulder(width)
+  aLongDrive_config.road.shoulder = math.max(0, math.min(width, MAX_SHOULDER))
+  M.rebuild()
 end
 
 ---@param enabled boolean
@@ -242,9 +267,11 @@ function M.newGame()
 end
 
 ---For the settings page.
----@return {active: boolean, seed: integer?, devMode: boolean, walking: boolean}
+---@return {active: boolean, seed: integer?, devMode: boolean, walking: boolean, shoulder: number, maxShoulder: number}
 function M.getState()
   return {
+    shoulder = aLongDrive_config.road.shoulder,
+    maxShoulder = MAX_SHOULDER,
     active = active,
     seed = active and currentSeed or nil,
     devMode = aLongDrive_config.devMode,
@@ -347,7 +374,7 @@ local function onExtensionLoaded()
   end
 end
 
-local function onUpdate(dtReal)
+local function update(dtReal)
   if not active then return end
   local player, car = be:getPlayerVehicle(0), be:getObjectByID(carId)
   if not player then return end
@@ -372,6 +399,17 @@ local function onUpdate(dtReal)
     shiftOrigin(player, pos)
   else
     updateChunks()
+  end
+end
+
+---An error in an extension's onUpdate stops the game's whole update hook for every extension after it,
+---every frame. So catch it, stop the mod and log once instead.
+---@param dtReal number
+local function onUpdate(dtReal)
+  local ok, err = xpcall(update, debug.traceback, dtReal)
+  if not ok then
+    log("E", "aLongDrive", "Stopping after an error: " .. tostring(err))
+    pcall(M.stop)
   end
 end
 
