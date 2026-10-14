@@ -66,7 +66,10 @@ local function updateChunks()
       changed = true
     end
   end
-  if changed then be:reloadCollision() end
+  if changed then
+    be:reloadCollision()
+    aLongDrive_pickups.collisionReloaded()
+  end
 end
 
 ---@param pos vec3 world position
@@ -135,7 +138,9 @@ local function shiftOrigin(veh, pos)
   for _, objects in pairs(chunks) do
     for _, object in ipairs(objects) do object:setPosition(object:getPosition() - shift) end
   end
+  aLongDrive_pickups.shift(shift)
   be:reloadCollision()
+  aLongDrive_pickups.collisionReloaded()
 end
 
 ---@param seed? number

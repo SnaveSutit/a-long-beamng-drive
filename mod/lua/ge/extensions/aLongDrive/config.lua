@@ -34,11 +34,11 @@ M.pickups = {
   dev = { fuelChance = 0.5, scrapMin = 1, scrapMax = 3 },
   lateralMin = 7, -- from the road centre; stay within the flat shoulder
   lateralMax = 9,
-  collectRadius = 3.5,
+  collectRadius = 3, -- measured to the prop; it vanishes as the car reaches it
   fuelLiters = 8,
   scrapAmount = 1,
-  fuel = { size = { 0.5, 0.3, 0.7 }, color = { 0.75, 0.08, 0.06 } }, -- width, depth, height
-  scrap = { size = { 1.2, 1.2, 0.6 }, color = { 0.4, 0.4, 0.42 } },
+  fuel = { model = "barrels", configs = { "filled_oil" } }, -- game props; one config is picked at random
+  scrap = { model = "cardboard_box", configs = { "small", "large" } },
 }
 
 M.thickness = 2 -- solid depth under the road and terrain; collision only works on closed volumes
