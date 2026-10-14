@@ -5,6 +5,7 @@ local M = {}
 M.road = {
   spacing = 30, -- between nodes
   maxTurn = 0.05, -- radians per node
+  startNodesBehind = 2, -- road behind the car when it starts
   width = 8,
   textureLength = 8,
   material = "a_asphalt_01_a",
@@ -37,6 +38,7 @@ M.pickupProps = {
   },
   scrap = {
     { model = "cardboard_box", config = "small" },
+    { model = "cardboard_box" },
     { model = "cardboard_box", config = "large" },
   },
 }

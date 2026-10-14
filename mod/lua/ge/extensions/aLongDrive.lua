@@ -175,18 +175,21 @@ function M.start(seed)
   M.stop()
   seed = seed or os.time()
   local pos, dir = veh:getPosition(), veh:getDirectionVector()
+  local heading = math.atan2(dir.y, dir.x)
+  local behind = aLongDrive_config.road.startNodesBehind
+  local back = behind * aLongDrive_config.road.spacing
   offset = vec3(0, 0, 0)
-  carNode = 0
+  carNode = behind
   distance, lastVirtual, resetNode = 0, nil, nil
   aLongDrive_pickups.reset(seed)
-  aLongDrive_road.reset(seed, pos.x, pos.y, aLongDrive_config.hills.minHeight, math.atan2(dir.y, dir.x))
+  aLongDrive_road.reset(seed, pos.x - math.cos(heading) * back, pos.y - math.sin(heading) * back, aLongDrive_config.hills.minHeight, heading)
   aLongDrive_meshBuilder.setSeed(seed)
   setPlaneMaterial(aLongDrive_config.terrain.material)
   core_vehicleBridge.registerValueChangeNotification(veh, "fuelVolume")
   core_vehicleBridge.registerValueChangeNotification(veh, "fuelCapacity")
   active = true
   updateChunks()
-  local roadPos, roadRot = roadPose(0)
+  local roadPos, roadRot = roadPose(carNode)
   veh:setPositionRotation(roadPos.x, roadPos.y, roadPos.z, roadRot.x, roadRot.y, roadRot.z, roadRot.w)
   updateResetTransform(veh)
 end
