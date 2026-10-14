@@ -4,6 +4,7 @@ local M = {}
 
 M.road = {
   spacing = 30, -- between nodes
+  meshStep = 5, -- target metres between mesh rows; smaller is smoother and heavier
   maxTurn = 0.05, -- radians per node
   startNodesBehind = 2, -- road behind the car when it starts
   width = 8,
@@ -13,15 +14,17 @@ M.road = {
 
 M.hills = {
   minHeight = 0.5, -- keeps the road clear of the flat plain beneath it
-  maxHeight = 25, -- road stays between minHeight and this above the plain
+  maxHeight = 100, -- road stays between minHeight and this above the plain
   wavelength = 600, -- metres between the crests of the main hills
   rollers = 0.3, -- 0 to 1: how much of the height comes from shorter rollers on top of the hills
   maxGrade = 0.08, -- rise over run; the steepest the road is allowed to get
 }
 
 M.terrain = {
-  halfWidth = 250, -- shaped terrain each side of the road, fading to the flat plain at the edge
-  cell = 10, -- lateral spacing of terrain vertices
+  halfWidth = 500, -- shaped terrain each side of the road, fading to the flat plain at the edge
+  fineWidth = 40, -- terrain this close to the road gets the fine rows; beyond it, one row per road node
+  cell = 10, -- lateral spacing of terrain vertices within fineWidth
+  farCell = 30, -- and beyond it
   shoulder = 6, -- flat ground beside the road edge
   blendDistance = 60, -- from the shoulder to full hill relief
   relief = 12, -- extra height of off-road hills

@@ -41,45 +41,65 @@ local function reliefNoise(x, y)
   return 0.65 * valueNoise(x / scale, y / scale) + 0.35 * valueNoise(x / (scale * 0.4) + 17.3, y / (scale * 0.4) + 9.1)
 end
 
----Lateral offsets from the road centre (positive is left), finest near the road.
+---Mirrors a list of positive offsets into a left-to-right list.
+---@param positive number[] ascending
 ---@return number[]
-local function buildOffsets()
-  local cfg = aLongDrive_config
-  local halfRoad = cfg.road.width / 2
-  local shoulderEdge = halfRoad + cfg.terrain.shoulder
-  local outer = {}
-  local o = shoulderEdge + cfg.terrain.cell
-  while o < cfg.terrain.halfWidth do
-    outer[#outer + 1] = o
-    o = o + cfg.terrain.cell
-  end
-  outer[#outer + 1] = cfg.terrain.halfWidth
-
-  local offsets = {}
-  for i = #outer, 1, -1 do offsets[#offsets + 1] = -outer[i] end
-  offsets[#offsets + 1] = -shoulderEdge
-  offsets[#offsets + 1] = -halfRoad
-  offsets[#offsets + 1] = halfRoad
-  offsets[#offsets + 1] = shoulderEdge
-  for _, v in ipairs(outer) do offsets[#offsets + 1] = v end
-  return offsets
+local function mirrored(positive)
+  local all = {}
+  for i = #positive, 1, -1 do all[#all + 1] = -positive[i] end
+  for _, v in ipairs(positive) do all[#all + 1] = v end
+  return all
 end
 
----@param i integer node index
----@return table node, number tx, number ty, number nx, number ny
-local function frame(i)
-  local prev, next = aLongDrive_road.getNode(math.max(i - 1, 0)), aLongDrive_road.getNode(i + 1)
-  local tx, ty = next.x - prev.x, next.y - prev.y
+---Positive lateral offsets from `from` to `to`, spaced `step` apart, always including both ends.
+---@return number[]
+local function steps(from, to, step)
+  local list = { from }
+  local o = from + step
+  while o < to - 1e-6 do
+    list[#list + 1] = o
+    o = o + step
+  end
+  if to > from then list[#list + 1] = to end
+  return list
+end
+
+---A point on a smooth curve through the road nodes (Catmull-Rom), so slope and heading change
+---gradually instead of kinking at every node.
+---@param f number fractional node index
+---@return {x: number, y: number, z: number} point, number nx, number ny the left-hand normal
+local function centerAt(f)
+  f = math.max(f, 0)
+  local i = math.floor(f)
+  local t = f - i
+  local t2, t3 = t * t, t * t * t
+  local road = aLongDrive_road
+  local p0, p1, p2, p3 = road.getNode(math.max(i - 1, 0)), road.getNode(i), road.getNode(i + 1), road.getNode(i + 2)
+
+  local function value(a, b, c, d)
+    return 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (3 * b - a - 3 * c + d) * t3)
+  end
+  local function slope(a, b, c, d)
+    return 0.5 * ((c - a) + 2 * (2 * a - 5 * b + 4 * c - d) * t + 3 * (3 * b - a - 3 * c + d) * t2)
+  end
+
+  local tx, ty = slope(p0.x, p1.x, p2.x, p3.x), slope(p0.y, p1.y, p2.y, p3.y)
   local len = math.sqrt(tx * tx + ty * ty)
-  tx, ty = tx / len, ty / len
-  return aLongDrive_road.getNode(i), tx, ty, -ty, tx
+  return { x = value(p0.x, p1.x, p2.x, p3.x), y = value(p0.y, p1.y, p2.y, p3.y), z = value(p0.z, p1.z, p2.z, p3.z) }, -ty / len, tx / len
+end
+
+---@return integer mesh rows per node segment
+local function rowsPerNode()
+  local road = aLongDrive_config.road
+  return math.max(1, math.floor(road.spacing / road.meshStep + 0.5))
 end
 
 ---@param faces table[]
 local function emit(faces, a, b, c)
-  for _, v in ipairs({ a, b, c }) do
-    faces[#faces + 1] = { v = v, u = v, n = v }
-  end
+  local n = #faces
+  faces[n + 1] = { v = a, u = a, n = a }
+  faces[n + 2] = { v = b, u = b, n = b }
+  faces[n + 3] = { v = c, u = c, n = c }
 end
 
 ---Appends a closed slab under a grid of top points: top, bottom and side walls.
@@ -133,22 +153,23 @@ local function newMesh(material)
   return { verts = {}, uvs = {}, normals = {}, faces = {}, material = material }
 end
 
----@param first integer
----@param last integer
+---@param first integer first node of the chunk
 ---@param offset vec3
-local function buildRoad(first, last, offset)
+local function buildRoad(first, offset)
   local cfg = aLongDrive_config
   local halfRoad = cfg.road.width / 2
+  local perNode = rowsPerNode()
   local top = {}
-  for i = first, last do
-    local node, _, _, nx, ny = frame(i)
-    local v = i * cfg.road.spacing / cfg.road.textureLength
+  for r = 0, (cfg.chunks.nodes - 1) * perNode do
+    local f = first + r / perNode
+    local center, nx, ny = centerAt(f)
+    local v = f * cfg.road.spacing / cfg.road.textureLength
     top[#top + 1] = {}
     for side = -1, 1, 2 do
       top[#top][#top[#top] + 1] = {
-        x = node.x + nx * halfRoad * side - offset.x,
-        y = node.y + ny * halfRoad * side - offset.y,
-        z = node.z,
+        x = center.x + nx * halfRoad * side - offset.x,
+        y = center.y + ny * halfRoad * side - offset.y,
+        z = center.z,
         nx = 0, ny = 0, nz = 1,
         u = (side + 1) / 2, v = v,
       }
@@ -159,35 +180,64 @@ local function buildRoad(first, last, offset)
   return mesh
 end
 
----@param first integer
----@param last integer
+---Terrain height at a point, given the road height beside it and its distance from the road.
+---@return number
+local function terrainHeight(x, y, roadZ, distance)
+  local terrain = aLongDrive_config.terrain
+  local shoulderEdge = aLongDrive_config.road.width / 2 + terrain.shoulder
+  local hills = terrain.relief * reliefNoise(x, y) * smoothstep(shoulderEdge, shoulderEdge + terrain.blendDistance, distance)
+  local edgeFade = 1 - smoothstep(terrain.halfWidth * 0.5, terrain.halfWidth, distance)
+  return (roadZ + hills) * edgeFade
+end
+
+---Where a node's row puts the terrain at a lateral offset: the samples the coarse mesh is made of.
+---@param i integer node index
+---@param o number lateral offset
+---@return table { x, y, z }
+local function nodePoint(i, o)
+  local center, nx, ny = centerAt(i)
+  local x, y = center.x + nx * o, center.y + ny * o
+  return { x = x, y = y, z = terrainHeight(x, y, center.z, math.abs(o)) }
+end
+
+---Fine rows: follows the smooth centre line near the road, and eases onto the straight lines between
+---node samples towards fineWidth, so its edge meets the coarse mesh with no crack.
+---@param f number fractional node index
+---@param o number lateral offset
+---@return table { x, y, z }
+local function finePoint(f, o)
+  local terrain = aLongDrive_config.terrain
+  local shoulderEdge = aLongDrive_config.road.width / 2 + terrain.shoulder
+  local distance = math.abs(o)
+
+  local center, nx, ny = centerAt(f)
+  local x, y = center.x + nx * o, center.y + ny * o
+  local z = terrainHeight(x, y, center.z, distance)
+
+  local w = smoothstep(shoulderEdge, terrain.fineWidth, distance)
+  if w == 0 then return { x = x, y = y, z = z } end
+  local i = math.floor(f)
+  local t = f - i
+  local a, b = nodePoint(i, o), nodePoint(i + 1, o)
+  return {
+    x = x + (a.x + (b.x - a.x) * t - x) * w,
+    y = y + (a.y + (b.y - a.y) * t - y) * w,
+    z = z + (a.z + (b.z - a.z) * t - z) * w,
+  }
+end
+
+---Turns a grid of positions into shaded, textured points with vertex normals.
+---@param grid table[][] grid[row][col] = { x, y, z }, with one spare row at each end
+---@param firstRow integer
+---@param lastRow integer
 ---@param offset vec3
-local function buildTerrain(first, last, offset)
-  local cfg = aLongDrive_config
-  local terrain = cfg.terrain
-  local halfRoad = cfg.road.width / 2
-  local shoulderEdge = halfRoad + terrain.shoulder
-  local offsets = buildOffsets()
-  local cols = #offsets
-
-  local lowRow, highRow = math.max(first - 1, 0), last + 1
-  local grid = {}
-  for r = lowRow, highRow do
-    local node, _, _, nx, ny = frame(r)
-    grid[r] = {}
-    for c, o in ipairs(offsets) do
-      local x, y = node.x + nx * o, node.y + ny * o
-      local distance = math.abs(o)
-      local hills = terrain.relief * reliefNoise(x, y) * smoothstep(shoulderEdge, shoulderEdge + terrain.blendDistance, distance)
-      local edgeFade = 1 - smoothstep(terrain.halfWidth * 0.5, terrain.halfWidth, distance)
-      grid[r][c] = { x = x, y = y, z = (node.z + hills) * edgeFade }
-    end
-  end
-
-  -- vertex normals from neighbouring rows and columns
+---@return table[][] points[row][col]
+local function shade(grid, firstRow, lastRow, offset)
+  local textureScale = aLongDrive_config.terrain.textureScale
   local points = {}
-  for r = first, last do
-    local before, after = grid[math.max(r - 1, lowRow)], grid[r + 1]
+  for r = firstRow, lastRow do
+    local before, after = grid[r - 1], grid[r + 1]
+    local cols = #grid[r]
     points[r] = {}
     for c = 1, cols do
       local p = grid[r][c]
@@ -199,26 +249,67 @@ local function buildTerrain(first, last, offset)
       points[r][c] = {
         x = p.x - offset.x, y = p.y - offset.y, z = p.z,
         nx = nx / len, ny = ny / len, nz = nz / len,
-        u = p.x / terrain.textureScale, v = p.y / terrain.textureScale,
+        u = p.x / textureScale, v = p.y / textureScale,
       }
     end
   end
+  return points
+end
 
-  -- one slab each side of the road; the road ribbon fills the strip between the road edges
+---Adds slabs for one side of the road from a shaded grid, for a range of its columns.
+---@param mesh table
+---@param points table[][]
+---@param firstRow integer
+---@param lastRow integer
+---@param fromCol integer
+---@param toCol integer
+local function addSlabFromGrid(mesh, points, firstRow, lastRow, fromCol, toCol)
+  local slab = {}
+  for r = firstRow, lastRow do
+    slab[#slab + 1] = {}
+    for c = fromCol, toCol do slab[#slab][#slab[#slab] + 1] = points[r][c] end
+  end
+  addSlab(mesh, slab, #slab, toCol - fromCol + 1)
+end
+
+---@param first integer first node of the chunk
+---@param offset vec3
+local function buildTerrain(first, offset)
+  local cfg = aLongDrive_config
+  local terrain = cfg.terrain
+  local halfRoad = cfg.road.width / 2
+  local shoulderEdge = halfRoad + terrain.shoulder
+  local nodes = cfg.chunks.nodes
+  local perNode = rowsPerNode()
   local mesh = newMesh(terrain.material)
-  local leftEnd, rightStart
-  for c, o in ipairs(offsets) do
-    if o == -halfRoad then leftEnd = c end
-    if o == halfRoad then rightStart = c end
+
+  -- Near the road: fine rows. Columns run left to right: -fineWidth .. -halfRoad, then halfRoad .. fineWidth.
+  local innerPositive = { halfRoad }
+  for _, o in ipairs(steps(shoulderEdge, terrain.fineWidth, terrain.cell)) do innerPositive[#innerPositive + 1] = o end
+  local innerOffsets = mirrored(innerPositive)
+  local lastFine = (nodes - 1) * perNode
+  local fine = {}
+  for r = -1, lastFine + 1 do
+    fine[r] = {}
+    local f = first + r / perNode
+    for c, o in ipairs(innerOffsets) do fine[r][c] = finePoint(math.max(f, 0), o) end
   end
-  for _, range in ipairs({ { 1, leftEnd }, { rightStart, cols } }) do
-    local slab = {}
-    for r = first, last do
-      slab[#slab + 1] = {}
-      for c = range[1], range[2] do slab[#slab][#slab[#slab] + 1] = points[r][c] end
-    end
-    addSlab(mesh, slab, #slab, range[2] - range[1] + 1)
+  local finePoints = shade(fine, 0, lastFine, offset)
+  local leftEnd, rightStart = #innerPositive, #innerPositive + 1 -- the road strip sits between them
+  addSlabFromGrid(mesh, finePoints, 0, lastFine, 1, leftEnd)
+  addSlabFromGrid(mesh, finePoints, 0, lastFine, rightStart, #innerOffsets)
+
+  -- Far from the road: coarse rows, one per node, and wider columns.
+  local outerPositive = steps(terrain.fineWidth, terrain.halfWidth, terrain.farCell)
+  local outerOffsets = mirrored(outerPositive)
+  local coarse = {}
+  for r = -1, nodes do
+    coarse[r] = {}
+    for c, o in ipairs(outerOffsets) do coarse[r][c] = nodePoint(math.max(first + r, 0), o) end
   end
+  local coarsePoints = shade(coarse, 0, nodes - 1, offset)
+  addSlabFromGrid(mesh, coarsePoints, 0, nodes - 1, 1, #outerPositive)
+  addSlabFromGrid(mesh, coarsePoints, 0, nodes - 1, #outerPositive + 1, #outerOffsets)
   return mesh
 end
 
@@ -226,10 +317,8 @@ end
 ---@param offset vec3 virtual position = world position + offset
 ---@return {road: table, terrain: table} one mesh per ProceduralMesh object, since only one mesh per object renders
 function M.build(chunk, offset)
-  local nodes = aLongDrive_config.chunks.nodes
-  local first = chunk * (nodes - 1)
-  local last = first + nodes - 1
-  return { road = buildRoad(first, last, offset), terrain = buildTerrain(first, last, offset) }
+  local first = chunk * (aLongDrive_config.chunks.nodes - 1)
+  return { road = buildRoad(first, offset), terrain = buildTerrain(first, offset) }
 end
 
 return M

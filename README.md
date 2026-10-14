@@ -18,7 +18,7 @@ Pickups are real props beside the road: steel barrels for fuel, cardboard boxes 
 
 ## Tune it
 
-Everything adjustable lives in `mod/lua/ge/extensions/aLongDrive/config.lua`: road width, hill height, steepness, spacing and roughness, terrain width and relief, materials. After editing, reload with `extensions.reload("aLongDrive")`.
+Everything adjustable lives in `mod/lua/ge/extensions/aLongDrive/config.lua`: road width, hill height, steepness, spacing, roughness and mesh detail, terrain width and relief, materials. After editing, reload with `extensions.reload("aLongDrive")`.
 
 ## Pick the pickup props
 

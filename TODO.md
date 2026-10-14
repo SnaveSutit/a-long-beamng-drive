@@ -35,6 +35,7 @@ Rough order within each section. Done items live in git history, not here.
 
 ## Known issues
 
+- [ ] Check the seams between chunks (every ~570 m) for bumps; neighbouring chunks are separate collision meshes
 - [ ] The camera fix at world shifts covers the orbit camera only. Chase, external and others may flicker
 - [ ] The vanilla recover keys (Home and Insert) may not use the on-road reset
 - [ ] Stepping out of the car means pressing the vanilla walking key (F) at a standstill
@@ -43,6 +44,6 @@ Rough order within each section. Done items live in git history, not here.
 ## Engineering
 
 - [ ] Automated tests for the seeded road and pickup placement
-- [ ] Profile chunk creation for hitches at speed
+- [ ] Profile chunk creation for hitches at speed (about 35 ms per chunk now; could be spread over frames)
 - [ ] Package the mod as a zip for release, and write a how-to-run for it
 - [ ] Demo and sign-off once the prototype loop (drive, collect, spend) works end to end
