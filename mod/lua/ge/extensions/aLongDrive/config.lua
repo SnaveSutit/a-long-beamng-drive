@@ -14,7 +14,9 @@ M.road = {
 M.hills = {
   minHeight = 0.5, -- keeps the road clear of the flat plain beneath it
   maxHeight = 25, -- road stays between minHeight and this above the plain
-  maxGrade = 0.06, -- rise over run
+  wavelength = 600, -- metres between the crests of the main hills
+  rollers = 0.3, -- 0 to 1: how much of the height comes from shorter rollers on top of the hills
+  maxGrade = 0.08, -- rise over run; the steepest the road is allowed to get
 }
 
 M.terrain = {
