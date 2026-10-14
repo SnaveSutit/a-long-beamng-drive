@@ -3,6 +3,7 @@
 local M = {}
 M.dependencies = { "ui_imgui", "aLongDrive_config", "aLongDrive_road", "aLongDrive_meshBuilder", "aLongDrive_pickups", "aLongDrive_hud" }
 
+local RESET_HEIGHT = 0.5 -- reset position above the road surface
 local TELEPORT_GRACE_FRAMES = 3
 local ORBIT_WORLD_POSITIONS = { "camLastTargetPos", "camLastTargetPos2", "camLastPos", "camLastPos2", "camLastPosPerp", "preResetPos" }
 
@@ -11,6 +12,7 @@ local offset = vec3(0, 0, 0) -- virtual position = world position + offset
 local carNode = 0
 local distance = 0 -- metres driven since start
 local lastVirtual -- last car position in virtual coordinates
+local resetNode -- road node the vehicle's reset transform currently points at
 local chunks = {} -- chunk index -> { road, terrain } ProceduralMesh objects
 local originalPlaneMaterials = {} -- ground plane name -> material
 
@@ -127,6 +129,25 @@ local function shiftOrbitCamera(veh, shift)
   ignoreShiftInOrbitCamera(orbit)
 end
 
+---Road position and heading at a node, in world coordinates.
+---@param i integer node index
+---@return vec3 position, quat rotation
+local function roadPose(i)
+  local node, nextNode = aLongDrive_road.getNode(i), aLongDrive_road.getNode(i + 1)
+  local forward = vec3(nextNode.x - node.x, nextNode.y - node.y, 0)
+  local rotation = quatFromDir(forward, vec3(0, 0, 1)) * quat(0, 0, 1, 0) -- vehicle forward is inverted
+  return vec3(node.x - offset.x, node.y - offset.y, node.z + RESET_HEIGHT), rotation
+end
+
+---Points the vehicle's reset position at the road under the car, so a reset puts it back on the road.
+---@param veh table
+local function updateResetTransform(veh)
+  if resetNode == carNode then return end
+  local pos, rot = roadPose(carNode)
+  veh:setOriginalTransform(pos.x, pos.y, pos.z, rot.x, rot.y, rot.z, rot.w)
+  resetNode = carNode
+end
+
 ---Moves the car back to the world origin without losing momentum, and the chunks with it.
 ---@param veh table
 ---@param pos vec3
@@ -134,6 +155,7 @@ local function shiftOrigin(veh, pos)
   local shift = vec3(pos.x, pos.y, 0)
   veh:setClusterPosRelRot(veh:getRefNodeId(), 0, 0, pos.z, 0, 0, 0, 1)
   offset = offset + shift
+  resetNode = nil
   shiftOrbitCamera(veh, shift)
   for _, objects in pairs(chunks) do
     for _, object in ipairs(objects) do object:setPosition(object:getPosition() - shift) end
@@ -155,7 +177,7 @@ function M.start(seed)
   local pos, dir = veh:getPosition(), veh:getDirectionVector()
   offset = vec3(0, 0, 0)
   carNode = 0
-  distance, lastVirtual = 0, nil
+  distance, lastVirtual, resetNode = 0, nil, nil
   aLongDrive_pickups.reset(seed)
   aLongDrive_road.reset(seed, pos.x, pos.y, aLongDrive_config.hills.minHeight, math.atan2(dir.y, dir.x))
   aLongDrive_meshBuilder.setSeed(seed)
@@ -164,6 +186,9 @@ function M.start(seed)
   core_vehicleBridge.registerValueChangeNotification(veh, "fuelCapacity")
   active = true
   updateChunks()
+  local roadPos, roadRot = roadPose(0)
+  veh:setPositionRotation(roadPos.x, roadPos.y, roadPos.z, roadRot.x, roadRot.y, roadRot.z, roadRot.w)
+  updateResetTransform(veh)
 end
 
 ---@param enabled boolean
@@ -206,6 +231,7 @@ local function onUpdate()
   if not veh then return end
   local pos = veh:getPosition()
   advanceCarNode(pos)
+  updateResetTransform(veh)
   trackDistance(pos)
   aLongDrive_pickups.update(pos, offset)
   drawHud(veh)
