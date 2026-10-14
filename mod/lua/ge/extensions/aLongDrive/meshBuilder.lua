@@ -4,6 +4,7 @@
 local M = {}
 
 local seedShift = 0
+local SLOPE_DIVISIONS = 3 -- mesh segments across the embankment, enough to follow its curve
 
 ---@param seed number
 function M.setSeed(seed)
@@ -52,11 +53,12 @@ local function mirrored(positive)
 end
 
 ---Positive lateral offsets from `from` to `to`, spaced `step` apart, always including both ends.
+---A point that would land closer than half a step to the end is dropped, so there are no near-duplicates.
 ---@return number[]
 local function steps(from, to, step)
   local list = { from }
   local o = from + step
-  while o < to - 1e-6 do
+  while o < to - step / 2 do
     list[#list + 1] = o
     o = o + step
   end
@@ -211,14 +213,14 @@ local function embankmentWidth()
 end
 
 ---Terrain height at a point, given the road height beside it and its distance from the road. The road bed
----is a mound: flat out to the shoulder edge, then sloping down to the ground, which rolls on from there.
+---is a mound: flat out to the shoulder edge, then an S-curve down to the ground, which rolls on from there.
 ---@return number
 local function terrainHeight(x, y, roadZ, distance)
   local cfg = aLongDrive_config
   local terrain = cfg.terrain
   local shoulderEdge = cfg.road.width / 2 + terrain.shoulder
   local slope = embankmentWidth()
-  local drop = slope > 0 and cfg.road.moundHeight * clamp((distance - shoulderEdge) / slope, 0, 1) or 0
+  local drop = slope > 0 and cfg.road.moundHeight * smoothstep(shoulderEdge, shoulderEdge + slope, distance) or 0
   local hillsStart = shoulderEdge + slope
   local hills = terrain.relief * reliefNoise(x, y) * smoothstep(hillsStart, hillsStart + terrain.blendDistance, distance)
   local edgeFade = 1 - smoothstep(terrain.halfWidth * 0.5, terrain.halfWidth, distance)
@@ -321,6 +323,9 @@ local function buildTerrain(first, offset)
   -- Near the road: fine rows. Columns run left to right: -fineWidth .. -halfRoad, then halfRoad .. fineWidth.
   local slopeEnd = math.min(shoulderEdge + embankmentWidth(), terrain.fineWidth)
   local innerPositive = { halfRoad, shoulderEdge }
+  if slopeEnd > shoulderEdge then
+    for k = 1, SLOPE_DIVISIONS - 1 do innerPositive[#innerPositive + 1] = shoulderEdge + (slopeEnd - shoulderEdge) * k / SLOPE_DIVISIONS end
+  end
   for _, o in ipairs(steps(slopeEnd, terrain.fineWidth, terrain.cell)) do innerPositive[#innerPositive + 1] = o end
   local innerOffsets = mirrored(innerPositive)
   local lastFine = (nodes - 1) * perNode

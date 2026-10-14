@@ -6,10 +6,10 @@ M.road = {
   spacing = 30, -- between nodes
   meshStep = 5, -- target metres between mesh rows; smaller is smoother and heavier
   maxTurn = 0.05, -- radians per node
-  startNodesBehind = 2, -- road behind the car when it starts
+  startNodesBehind = 20, -- road behind the car when it starts
   width = 8,
   moundHeight = 0.8, -- the road bed sits this far above the ground beside it
-  embankment = 3, -- metres of slope per metre of drop, from the shoulder down to the ground
+  embankment = 6, -- metres of slope per metre of drop. The drop is an S-curve, so its steepest part is 1.5x the average
 }
 
 -- The road switches between these as it goes. Each stretch lasts a random length in metres.
@@ -30,7 +30,7 @@ M.hills = {
 
 M.terrain = {
   halfWidth = 500, -- shaped terrain each side of the road, fading to the flat plain at the edge
-  fineWidth = 40, -- terrain this close to the road gets the fine rows; beyond it, one row per road node
+  fineWidth = 30, -- terrain this close to the road gets the fine rows; beyond it, one row per road node
   cell = 10, -- lateral spacing of terrain vertices within fineWidth
   farCell = 30, -- and beyond it
   shoulder = 6, -- flat ground beside the road edge
