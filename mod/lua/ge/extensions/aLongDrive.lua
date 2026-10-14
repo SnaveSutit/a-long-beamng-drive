@@ -1,7 +1,7 @@
 -- A Long Drive: endless procedural road and terrain with a floating origin.
 
 local M = {}
-M.dependencies = { "aLongDrive_config", "aLongDrive_road", "aLongDrive_meshBuilder" }
+M.dependencies = { "ui_imgui", "aLongDrive_config", "aLongDrive_road", "aLongDrive_meshBuilder", "aLongDrive_pickups", "aLongDrive_hud" }
 
 local TELEPORT_GRACE_FRAMES = 3
 local ORBIT_WORLD_POSITIONS = { "camLastTargetPos", "camLastTargetPos2", "camLastPos", "camLastPos2", "camLastPosPerp", "preResetPos" }
@@ -9,6 +9,8 @@ local ORBIT_WORLD_POSITIONS = { "camLastTargetPos", "camLastTargetPos2", "camLas
 local active = false
 local offset = vec3(0, 0, 0) -- virtual position = world position + offset
 local carNode = 0
+local distance = 0 -- metres driven since start
+local lastVirtual -- last car position in virtual coordinates
 local chunks = {} -- chunk index -> { road, terrain } ProceduralMesh objects
 local originalPlaneMaterials = {} -- ground plane name -> material
 
@@ -32,10 +34,12 @@ local function createChunk(c)
     createMeshObject("aLongDrive_road_" .. c, meshes.road),
     createMeshObject("aLongDrive_terrain_" .. c, meshes.terrain),
   }
+  aLongDrive_pickups.spawn(c, offset)
 end
 
 local function deleteChunk(c)
   for _, object in ipairs(chunks[c]) do object:delete() end
+  aLongDrive_pickups.despawn(c)
   chunks[c] = nil
 end
 
@@ -131,6 +135,7 @@ local function shiftOrigin(veh, pos)
   for _, objects in pairs(chunks) do
     for _, object in ipairs(objects) do object:setPosition(object:getPosition() - shift) end
   end
+  aLongDrive_pickups.shift(shift)
   be:reloadCollision()
 end
 
@@ -146,9 +151,13 @@ function M.start(seed)
   local pos, dir = veh:getPosition(), veh:getDirectionVector()
   offset = vec3(0, 0, 0)
   carNode = 0
+  distance, lastVirtual = 0, nil
+  aLongDrive_pickups.reset(seed)
   aLongDrive_road.reset(seed, pos.x, pos.y, aLongDrive_config.hills.minHeight, math.atan2(dir.y, dir.x))
   aLongDrive_meshBuilder.setSeed(seed)
   setPlaneMaterial(aLongDrive_config.terrain.material)
+  core_vehicleBridge.registerValueChangeNotification(veh, "fuelVolume")
+  core_vehicleBridge.registerValueChangeNotification(veh, "fuelCapacity")
   active = true
   updateChunks()
 end
@@ -157,6 +166,24 @@ function M.stop()
   active = false
   clearChunks()
   setPlaneMaterial(nil)
+end
+
+---@param pos vec3 world position
+local function trackDistance(pos)
+  local virtual = vec3(pos.x + offset.x, pos.y + offset.y, 0)
+  if lastVirtual then distance = distance + (virtual - lastVirtual):length() end
+  lastVirtual = virtual
+end
+
+---@param veh table
+local function drawHud(veh)
+  local id = veh:getId()
+  aLongDrive_hud.draw({
+    fuel = core_vehicleBridge.getCachedVehicleData(id, "fuelVolume"),
+    fuelCapacity = core_vehicleBridge.getCachedVehicleData(id, "fuelCapacity"),
+    scrap = aLongDrive_pickups.getStats().scrap,
+    distance = distance,
+  })
 end
 
 local function onExtensionLoaded()
@@ -169,6 +196,9 @@ local function onUpdate()
   if not veh then return end
   local pos = veh:getPosition()
   advanceCarNode(pos)
+  trackDistance(pos)
+  aLongDrive_pickups.update(pos, offset)
+  drawHud(veh)
   if math.max(math.abs(pos.x), math.abs(pos.y)) > aLongDrive_config.shiftDistance then
     shiftOrigin(veh, pos)
   else

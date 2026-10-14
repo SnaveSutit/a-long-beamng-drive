@@ -10,10 +10,62 @@
     "Stages": [
       {
         "baseColorMap": "/assets/materials/tileable/soil/t_italy_terrain_dirt/t_italy_terrain_dirt_b.color.png",
-        "baseColorFactor": [0.62, 0.42, 0.25, 1],
+        "baseColorFactor": [
+          0.62,
+          0.42,
+          0.25,
+          1
+        ],
         "normalMap": "/assets/materials/tileable/soil/t_italy_terrain_dirt/t_italy_terrain_dirt_nm.normal.png",
         "roughnessFactor": 0.69,
-        "detailScale": [0.2, 0.2]
+        "detailScale": [
+          0.2,
+          0.2
+        ]
+      },
+      {},
+      {},
+      {}
+    ]
+  },
+  "aLongDrive_fuel": {
+    "name": "aLongDrive_fuel",
+    "mapTo": "aLongDrive_fuel",
+    "class": "Material",
+    "version": 1.5,
+    "doubleSided": true,
+    "translucentBlendOp": "None",
+    "Stages": [
+      {
+        "baseColorFactor": [
+          0.75,
+          0.08,
+          0.06,
+          1
+        ],
+        "roughnessFactor": 0.6
+      },
+      {},
+      {},
+      {}
+    ]
+  },
+  "aLongDrive_scrap": {
+    "name": "aLongDrive_scrap",
+    "mapTo": "aLongDrive_scrap",
+    "class": "Material",
+    "version": 1.5,
+    "doubleSided": true,
+    "translucentBlendOp": "None",
+    "Stages": [
+      {
+        "baseColorFactor": [
+          0.35,
+          0.36,
+          0.38,
+          1
+        ],
+        "roughnessFactor": 0.6
       },
       {},
       {},

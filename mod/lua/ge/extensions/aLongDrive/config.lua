@@ -27,6 +27,19 @@ M.terrain = {
   material = "aLongDrive_dirt" -- defined in art/aLongDrive/main.materials.json,
 }
 
+M.pickups = {
+  fuelChance = 0.5, -- per chunk
+  scrapMin = 1, -- scrap piles per chunk
+  scrapMax = 3,
+  lateralMin = 7, -- from the road centre; stay within the flat shoulder
+  lateralMax = 9,
+  collectRadius = 3.5,
+  fuelLiters = 8,
+  scrapAmount = 1,
+  fuel = { size = { 0.5, 0.3, 0.7 }, material = "aLongDrive_fuel" }, -- along, across, height
+  scrap = { size = { 1.2, 1.2, 0.6 }, material = "aLongDrive_scrap" },
+}
+
 M.thickness = 2 -- solid depth under the road and terrain; collision only works on closed volumes
 
 M.chunks = {
