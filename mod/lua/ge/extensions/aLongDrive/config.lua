@@ -9,7 +9,7 @@ M.road = {
   startNodesBehind = 20, -- road behind the car when it starts
   width = 8,
   moundHeight = 0.8, -- the road bed sits this far above the ground beside it
-  embankment = 6, -- metres of slope per metre of drop. The drop is an S-curve, so its steepest part is 1.5x the average
+  embankment = 2, -- metres of slope per metre of drop. The drop is an S-curve, so its steepest part is 1.5x the average
 }
 
 -- The road switches between these as it goes. Each stretch lasts a random length in metres.

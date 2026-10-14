@@ -10,7 +10,7 @@ Work in progress. The prototype runs on the `smallgrid` level.
    `ln -s "$PWD/mod" <user folder>/mods/unpacked/a_long_drive`
 2. Start BeamNG and load the Grid, Small, Pure level (`smallgrid`).
 3. Get in the car you want to drive, open the pause menu and go to **Mods > A Long Drive**. **New game, random seed** builds a new road from a random seed and puts your car on it. The seed is shown on the page, so a run can be repeated from the Lua console (`~`) with `aLongDrive.start(<seed>)`.
-4. **Stop** removes the road and restores the grid. **Frequent pickups** makes fuel and scrap spawn far more often, for testing; the console equivalent is `aLongDrive.setDevMode(true)`.
+4. **Stop** removes the road and restores the grid. **Frequent pickups** makes fuel and scrap spawn far more often, for testing; the console equivalent is `aLongDrive.setDevMode(true)`. **Reload mod** reloads the Lua code, config and materials without restarting the game, and restarts a running road with the same seed (console: `aLongDrive.reload()`). **Reload UI** is for edits to the page itself.
 
 ## The road
 

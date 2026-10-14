@@ -45,6 +45,20 @@
       </div>
       <BngSwitch :model-value="state.devMode" :disabled="loading" @update:model-value="setDevMode" />
     </section>
+
+    <section class="ald-row">
+      <div class="ald-copy">
+        <div class="ald-label">Reload</div>
+        <div class="ald-desc">
+          Reload mod picks up edits to the Lua code, config and materials, and restarts a running road with the same
+          seed. Reload UI is for edits to this page, and closes the menu.
+        </div>
+      </div>
+      <div class="ald-buttons">
+        <BngButton accent="outlined" :disabled="loading" @click="reloadMod">Reload mod</BngButton>
+        <BngButton accent="outlined" :disabled="loading" @click="reloadUi">Reload UI</BngButton>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -109,6 +123,21 @@ async function stop() {
   } catch {
     error.value = "Could not stop."
   }
+}
+
+async function reloadMod() {
+  error.value = ""
+  try {
+    const result = await runLua("aLongDrive.reload()")
+    if (!result?.ok) error.value = result?.error || "The reload failed."
+    await refresh()
+  } catch {
+    error.value = "The reload failed. Check the log."
+  }
+}
+
+function reloadUi() {
+  runLua("reloadUI()")
 }
 
 function setDevMode(value) {
@@ -197,6 +226,11 @@ onUnmounted(() => {
 .ald-copy {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.ald-buttons {
+  display: flex;
+  gap: 0.25rem;
 }
 
 .ald-label {

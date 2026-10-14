@@ -4,6 +4,9 @@ local M = {}
 M.dependencies = { "ui_imgui", "aLongDrive_config", "aLongDrive_road", "aLongDrive_meshBuilder", "aLongDrive_pickups", "aLongDrive_hud" }
 
 local RESET_HEIGHT = 0.5 -- reset position above the road surface
+-- unload order for a reload: the extension first, then what it depends on
+local MODULES = { "aLongDrive", "aLongDrive_hud", "aLongDrive_pickups", "aLongDrive_meshBuilder", "aLongDrive_road", "aLongDrive_config" }
+local UNPACKED_MOD = "/mods/unpacked/a_long_drive/"
 local TELEPORT_GRACE_FRAMES = 3
 local ORBIT_WORLD_POSITIONS = { "camLastTargetPos", "camLastTargetPos2", "camLastPos", "camLastPos2", "camLastPosPerp", "preResetPos" }
 
@@ -247,6 +250,26 @@ function M.getState()
     devMode = aLongDrive_config.devMode,
     walking = isWalking(),
   }
+end
+
+---Reloads every module of the mod from disk. A road that was running restarts with the same seed.
+---Meant for development: it picks up code, config and material edits without restarting the game.
+---@return {ok: boolean, restarted: boolean, error: string?}
+function M.reload()
+  local wasActive, seed, devMode = active, currentSeed, aLongDrive_config.devMode
+
+  if FS:directoryExists(UNPACKED_MOD) then -- a stale mount hides new or renamed files
+    FS:unmount(UNPACKED_MOD)
+    FS:mount(UNPACKED_MOD)
+  end
+  for _, name in ipairs(MODULES) do extensions.unload(name) end
+  extensions.load("aLongDrive")
+  if not aLongDrive then return { ok = false, restarted = false, error = "The mod failed to load again. Check the log." } end
+
+  aLongDrive_config.devMode = devMode
+  if not wasActive then return { ok = true, restarted = false } end
+  local ok, reason = aLongDrive.start(seed)
+  return { ok = ok, restarted = ok, error = reason }
 end
 
 function M.stop()
