@@ -11,7 +11,7 @@ local FLAGS = bit.bor(
 )
 local LOW_FUEL = 0.15
 
----@param data {fuel: number?, fuelCapacity: number?, scrap: number, distance: number} distance in metres
+---@param data {fuel: number?, fuelCapacity: number?, scrap: number, distance: number, prompt: string?} distance in metres
 function M.draw(data)
   im.SetNextWindowPos(im.ImVec2(24, 24), im.Cond_Always)
   im.SetNextWindowBgAlpha(0.45)
@@ -26,6 +26,10 @@ function M.draw(data)
   end
   im.Text(string.format("Scrap     %d", data.scrap))
   im.Text(string.format("Distance  %.2f km", data.distance / 1000))
+  if data.prompt then
+    im.Separator()
+    im.TextColored(im.ImVec4(1, 0.85, 0.3, 1), data.prompt)
+  end
 
   im.End()
 end

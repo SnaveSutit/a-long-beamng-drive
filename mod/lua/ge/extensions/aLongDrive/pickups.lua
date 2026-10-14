@@ -166,22 +166,12 @@ function M.refresh()
   end
 end
 
----Moves the props with the world when the origin shifts.
----@param shift vec3
-function M.shift(shift)
-  for _, list in pairs(active) do
-    for _, p in ipairs(list) do
-      local veh, pos = p.vehicle, p.vehicle:getPosition()
-      veh:setClusterPosRelRot(veh:getRefNodeId(), pos.x - shift.x, pos.y - shift.y, pos.z, 0, 0, 0, 1)
-    end
-  end
-end
-
----@param p table
-local function collect(p)
+---@param p table pickup
+---@param car table the vehicle that gets the fuel
+local function applyPickup(p, car)
   local cfg = aLongDrive_config.pickups
   if p.kind == "fuel" then
-    be:getPlayerVehicle(0):queueLuaCommand(string.format([[
+    car:queueLuaCommand(string.format([[
       for _, s in pairs(energyStorage.getStorages()) do
         if s.fuelLiquidDensity and s.energyCapacity > 0 then
           s:setRemainingVolume(s.storedEnergy / s.energyCapacity * s.capacity + %f)
@@ -194,29 +184,46 @@ local function collect(p)
   end
 end
 
----Collects any pickup within reach of the car. Props can roll, so distance uses their live position.
----@param carPos vec3 world position
+---Spawns pickups that were waiting for collision to settle.
 ---@param offset vec3 virtual position = world position + offset
-function M.update(carPos, offset)
+function M.update(offset)
   if settleFrames > 0 then
     settleFrames = settleFrames - 1
   elseif next(pending) then
     spawnPending(offset)
   end
-  local radiusSq = aLongDrive_config.pickups.collectRadius ^ 2
+end
+
+---Props can roll or get knocked, so distance uses their live position.
+---@param pos vec3 world position
+---@param maxDistance number metres, horizontal
+---@return table? pickup, integer? chunk, integer? index
+function M.nearest(pos, maxDistance)
+  local best, bestChunk, bestIndex, bestDistSq = nil, nil, nil, maxDistance ^ 2
   for chunk, list in pairs(active) do
-    for i = #list, 1, -1 do
-      local p = list[i]
-      local pos = p.vehicle:getPosition()
-      local dx, dy = pos.x - carPos.x, pos.y - carPos.y
-      if dx * dx + dy * dy < radiusSq and math.abs(pos.z - carPos.z) < 3 then
-        collect(p)
-        collected[chunk .. ":" .. p.slot] = true
-        p.vehicle:delete()
-        table.remove(list, i)
+    for i, p in ipairs(list) do
+      local at = p.vehicle:getPosition()
+      local dx, dy = at.x - pos.x, at.y - pos.y
+      if dx * dx + dy * dy < bestDistSq and math.abs(at.z - pos.z) < 3 then
+        best, bestChunk, bestIndex, bestDistSq = p, chunk, i, dx * dx + dy * dy
       end
     end
   end
+  return best, bestChunk, bestIndex
+end
+
+---Collects the nearest pickup within reach of the player.
+---@param pos vec3 the player's world position
+---@param car table
+---@return boolean collected
+function M.collectNearest(pos, car)
+  local p, chunk, index = M.nearest(pos, aLongDrive_config.pickups.reach)
+  if not p then return false end
+  applyPickup(p, car)
+  collected[chunk .. ":" .. p.slot] = true
+  p.vehicle:delete()
+  table.remove(active[chunk], index)
+  return true
 end
 
 ---@return {scrap: number}

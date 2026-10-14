@@ -38,7 +38,6 @@ M.pickupProps = {
   },
   scrap = {
     { model = "cardboard_box", config = "small" },
-    { model = "cardboard_box" },
     { model = "cardboard_box", config = "large" },
   },
 }
@@ -48,7 +47,8 @@ M.pickups = {
   dev = { fuelChance = 0.5, scrapMin = 1, scrapMax = 3 },
   lateralMin = 7, -- from the road centre; stay within the flat shoulder
   lateralMax = 9,
-  collectRadius = 3, -- measured to the prop; it vanishes as the car reaches it
+  reach = 2.5, -- how close, on foot, you must be to collect a pickup
+  keyLabel = "G", -- shown in the prompt; the key itself is in settings/inputmaps/keyboard_aLongDrive.json
   fuelLiters = 8,
   scrapAmount = 1,
 }

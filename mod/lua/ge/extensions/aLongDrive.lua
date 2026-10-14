@@ -9,10 +9,16 @@ local ORBIT_WORLD_POSITIONS = { "camLastTargetPos", "camLastTargetPos2", "camLas
 
 local active = false
 local offset = vec3(0, 0, 0) -- virtual position = world position + offset
-local carNode = 0
+local carId -- the vehicle the player started in; it stays put while they walk
+local playerNode = 0 -- road node nearest the player (car or on foot), drives chunk streaming
+local carRoadNode = 0 -- road node nearest the car, drives its reset position
+local IN_CAR_HINT_DISTANCE = 6 -- tell a driver who is this close to a pickup to get out
+local FUEL_POLL_SECONDS = 0.25
 local distance = 0 -- metres driven since start
 local lastVirtual -- last car position in virtual coordinates
 local resetNode -- road node the vehicle's reset transform currently points at
+local fuel, fuelCapacity -- litres, reported back by the car
+local fuelPollTimer = 0
 local chunks = {} -- chunk index -> { road, terrain } ProceduralMesh objects
 local originalPlaneMaterials = {} -- ground plane name -> material
 
@@ -53,8 +59,8 @@ end
 local function updateChunks()
   local cfg = aLongDrive_config.chunks
   local stride = cfg.nodes - 1 -- neighbouring chunks share one node
-  local carChunk = math.floor(carNode / stride)
-  local first, last = math.max(0, carChunk - cfg.behind), carChunk + cfg.ahead
+  local playerChunk = math.floor(playerNode / stride)
+  local first, last = math.max(0, playerChunk - cfg.behind), playerChunk + cfg.ahead
   local changed = false
   for c in pairs(chunks) do
     if c < first or c > last then
@@ -74,16 +80,20 @@ local function updateChunks()
   end
 end
 
+---Walks a road node index forward to the node nearest a position.
+---@param node integer
 ---@param pos vec3 world position
-local function advanceCarNode(pos)
+---@return integer
+local function advanceNode(node, pos)
   local vx, vy = pos.x + offset.x, pos.y + offset.y
   local function distSq(i)
     local n = aLongDrive_road.getNode(i)
     return (n.x - vx) ^ 2 + (n.y - vy) ^ 2
   end
-  while distSq(carNode + 1) < distSq(carNode) do
-    carNode = carNode + 1
+  while distSq(node + 1) < distSq(node) do
+    node = node + 1
   end
+  return node
 end
 
 ---Swaps the level's ground plane material, remembering the originals.
@@ -139,28 +149,31 @@ local function roadPose(i)
   return vec3(node.x - offset.x, node.y - offset.y, node.z + RESET_HEIGHT), rotation
 end
 
----Points the vehicle's reset position at the road under the car, so a reset puts it back on the road.
----@param veh table
-local function updateResetTransform(veh)
-  if resetNode == carNode then return end
-  local pos, rot = roadPose(carNode)
-  veh:setOriginalTransform(pos.x, pos.y, pos.z, rot.x, rot.y, rot.z, rot.w)
-  resetNode = carNode
+---Points the car's reset position at the road under it, so a reset puts it back on the road.
+---@param car table
+local function updateResetTransform(car)
+  if resetNode == carRoadNode then return end
+  local pos, rot = roadPose(carRoadNode)
+  car:setOriginalTransform(pos.x, pos.y, pos.z, rot.x, rot.y, rot.z, rot.w)
+  resetNode = carRoadNode
 end
 
----Moves the car back to the world origin without losing momentum, and the chunks with it.
----@param veh table
----@param pos vec3
-local function shiftOrigin(veh, pos)
+---Moves every vehicle, the player's included, so the car and any parked or prop vehicles stay in place
+---relative to the player, and the chunks with them.
+---@param player table
+---@param pos vec3 the player's world position, which becomes the new origin
+local function shiftOrigin(player, pos)
   local shift = vec3(pos.x, pos.y, 0)
-  veh:setClusterPosRelRot(veh:getRefNodeId(), 0, 0, pos.z, 0, 0, 0, 1)
+  for _, veh in activeVehiclesIterator() do
+    local p = veh:getPosition()
+    veh:setClusterPosRelRot(veh:getRefNodeId(), p.x - shift.x, p.y - shift.y, p.z, 0, 0, 0, 1)
+  end
   offset = offset + shift
   resetNode = nil
-  shiftOrbitCamera(veh, shift)
+  shiftOrbitCamera(player, shift)
   for _, objects in pairs(chunks) do
     for _, object in ipairs(objects) do object:setPosition(object:getPosition() - shift) end
   end
-  aLongDrive_pickups.shift(shift)
   be:reloadCollision()
   aLongDrive_pickups.collisionReloaded()
 end
@@ -172,24 +185,28 @@ function M.start(seed)
     log("W", "aLongDrive", "No player vehicle, not starting")
     return
   end
+  if gameplay_walk and gameplay_walk.isWalking() then
+    log("W", "aLongDrive", "Get in a car before starting")
+    return
+  end
   M.stop()
+  carId = veh:getId()
   seed = seed or os.time()
   local pos, dir = veh:getPosition(), veh:getDirectionVector()
   local heading = math.atan2(dir.y, dir.x)
   local behind = aLongDrive_config.road.startNodesBehind
   local back = behind * aLongDrive_config.road.spacing
   offset = vec3(0, 0, 0)
-  carNode = behind
+  playerNode, carRoadNode = behind, behind
   distance, lastVirtual, resetNode = 0, nil, nil
   aLongDrive_pickups.reset(seed)
   aLongDrive_road.reset(seed, pos.x - math.cos(heading) * back, pos.y - math.sin(heading) * back, aLongDrive_config.hills.minHeight, heading)
   aLongDrive_meshBuilder.setSeed(seed)
   setPlaneMaterial(aLongDrive_config.terrain.material)
-  core_vehicleBridge.registerValueChangeNotification(veh, "fuelVolume")
-  core_vehicleBridge.registerValueChangeNotification(veh, "fuelCapacity")
+  fuel, fuelCapacity, fuelPollTimer = nil, nil, 0
   active = true
   updateChunks()
-  local roadPos, roadRot = roadPose(carNode)
+  local roadPos, roadRot = roadPose(carRoadNode)
   veh:setPositionRotation(roadPos.x, roadPos.y, roadPos.z, roadRot.x, roadRot.y, roadRot.z, roadRot.w)
   updateResetTransform(veh)
 end
@@ -213,33 +230,87 @@ local function trackDistance(pos)
   lastVirtual = virtual
 end
 
----@param veh table
-local function drawHud(veh)
-  local id = veh:getId()
+---Called by the car's own Lua with its tank levels. The vehicle bridge's cache goes stale once you
+---step out of the car, so the car reports its fuel back instead.
+---@param liters number
+---@param capacity number
+function M.setFuel(liters, capacity)
+  fuel, fuelCapacity = liters, capacity
+end
+
+---@param car table
+local function requestFuel(car)
+  car:queueLuaCommand([[
+    local liters, capacity = 0, 0
+    for _, s in pairs(energyStorage.getStorages()) do
+      if s.fuelLiquidDensity and s.energyCapacity > 0 then
+        liters = liters + s.storedEnergy / s.energyCapacity * s.capacity
+        capacity = capacity + s.capacity
+      end
+    end
+    obj:queueGameEngineLua(string.format("if aLongDrive then aLongDrive.setFuel(%f, %f) end", liters, capacity))
+  ]])
+end
+
+---@return boolean
+local function isWalking()
+  return gameplay_walk ~= nil and gameplay_walk.isWalking()
+end
+
+---@param player table
+local function drawHud(player)
+  local prompt
+  if isWalking() then
+    local pickup = aLongDrive_pickups.nearest(player:getPosition(), aLongDrive_config.pickups.reach)
+    if pickup then prompt = string.format("[%s] Collect %s", aLongDrive_config.pickups.keyLabel, pickup.kind) end
+  end
   aLongDrive_hud.draw({
-    fuel = core_vehicleBridge.getCachedVehicleData(id, "fuelVolume"),
-    fuelCapacity = core_vehicleBridge.getCachedVehicleData(id, "fuelCapacity"),
+    fuel = fuel,
+    fuelCapacity = fuelCapacity,
     scrap = aLongDrive_pickups.getStats().scrap,
     distance = distance,
+    prompt = prompt,
   })
+end
+
+---Bound to the collect key: picks up the pickup in reach while on foot.
+function M.collect()
+  local player, car = be:getPlayerVehicle(0), be:getObjectByID(carId or -1)
+  if not (active and player and car) then return end
+  if isWalking() then
+    aLongDrive_pickups.collectNearest(player:getPosition(), car)
+  elseif aLongDrive_pickups.nearest(player:getPosition(), IN_CAR_HINT_DISTANCE) then
+    ui_message("Get out of the car to pick that up", 3, "aLongDrive")
+  end
 end
 
 local function onExtensionLoaded()
   loadJsonMaterialsFile("/art/aLongDrive/main.materials.json")
 end
 
-local function onUpdate()
+local function onUpdate(dtReal)
   if not active then return end
-  local veh = be:getPlayerVehicle(0)
-  if not veh then return end
-  local pos = veh:getPosition()
-  advanceCarNode(pos)
-  updateResetTransform(veh)
+  local player, car = be:getPlayerVehicle(0), be:getObjectByID(carId)
+  if not player then return end
+  if not car then
+    log("W", "aLongDrive", "The car is gone, stopping")
+    M.stop()
+    return
+  end
+  local pos = player:getPosition()
+  playerNode = advanceNode(playerNode, pos)
+  carRoadNode = advanceNode(carRoadNode, car:getPosition())
+  updateResetTransform(car)
+  fuelPollTimer = fuelPollTimer - dtReal
+  if fuelPollTimer <= 0 then
+    fuelPollTimer = FUEL_POLL_SECONDS
+    requestFuel(car)
+  end
   trackDistance(pos)
-  aLongDrive_pickups.update(pos, offset)
-  drawHud(veh)
+  aLongDrive_pickups.update(offset)
+  drawHud(player)
   if math.max(math.abs(pos.x), math.abs(pos.y)) > aLongDrive_config.shiftDistance then
-    shiftOrigin(veh, pos)
+    shiftOrigin(player, pos)
   else
     updateChunks()
   end

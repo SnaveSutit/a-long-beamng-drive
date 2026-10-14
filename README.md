@@ -13,6 +13,10 @@ Work in progress. The prototype runs on the `smallgrid` level.
 4. `aLongDrive.stop()` removes the road and restores the grid.
 5. `aLongDrive.setDevMode(true)` makes pickups frequent for testing; `false` goes back to the normal, rare rates.
 
+## Collect pickups
+
+Pickups are real props beside the road: steel barrels for fuel, cardboard boxes for scrap. Driving past them does nothing. Stop, press `F` to step out of the car (the game's walking mode), walk up to a prop and press `G` to collect it. Fuel goes into the car's tank wherever it is parked. The `G` binding ships with the mod and can be changed in Options > Controls (Gameplay > Collect pickup).
+
 ## Tune it
 
 Everything adjustable lives in `mod/lua/ge/extensions/aLongDrive/config.lua`: road width, hill height and grade, terrain width and relief, materials. After editing, reload with `extensions.reload("aLongDrive")`.
