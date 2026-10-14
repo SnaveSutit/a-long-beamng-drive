@@ -27,49 +27,5 @@
       {},
       {}
     ]
-  },
-  "aLongDrive_fuel": {
-    "name": "aLongDrive_fuel",
-    "mapTo": "aLongDrive_fuel",
-    "class": "Material",
-    "version": 1.5,
-    "doubleSided": true,
-    "translucentBlendOp": "None",
-    "Stages": [
-      {
-        "baseColorFactor": [
-          0.75,
-          0.08,
-          0.06,
-          1
-        ],
-        "roughnessFactor": 0.6
-      },
-      {},
-      {},
-      {}
-    ]
-  },
-  "aLongDrive_scrap": {
-    "name": "aLongDrive_scrap",
-    "mapTo": "aLongDrive_scrap",
-    "class": "Material",
-    "version": 1.5,
-    "doubleSided": true,
-    "translucentBlendOp": "None",
-    "Stages": [
-      {
-        "baseColorFactor": [
-          0.35,
-          0.36,
-          0.38,
-          1
-        ],
-        "roughnessFactor": 0.6
-      },
-      {},
-      {},
-      {}
-    ]
   }
 }

@@ -34,7 +34,7 @@ local function createChunk(c)
     createMeshObject("aLongDrive_road_" .. c, meshes.road),
     createMeshObject("aLongDrive_terrain_" .. c, meshes.terrain),
   }
-  aLongDrive_pickups.spawn(c, offset)
+  aLongDrive_pickups.spawn(c)
 end
 
 local function deleteChunk(c)
@@ -135,7 +135,6 @@ local function shiftOrigin(veh, pos)
   for _, objects in pairs(chunks) do
     for _, object in ipairs(objects) do object:setPosition(object:getPosition() - shift) end
   end
-  aLongDrive_pickups.shift(shift)
   be:reloadCollision()
 end
 
@@ -160,6 +159,12 @@ function M.start(seed)
   core_vehicleBridge.registerValueChangeNotification(veh, "fuelCapacity")
   active = true
   updateChunks()
+end
+
+---@param enabled boolean
+function M.setDevMode(enabled)
+  aLongDrive_config.devMode = enabled
+  aLongDrive_pickups.refresh()
 end
 
 function M.stop()

@@ -11,6 +11,7 @@ Work in progress. The prototype runs on the `smallgrid` level.
 2. Start BeamNG and load the Grid, Small, Pure level (`smallgrid`).
 3. Open the in-game Lua console (`~`) and run `extensions.load("aLongDrive"); aLongDrive.start(1234)`. The number is the seed; leave it out for a random road.
 4. `aLongDrive.stop()` removes the road and restores the grid.
+5. `aLongDrive.setDevMode(true)` makes pickups frequent for testing; `false` goes back to the normal, rare rates.
 
 ## Tune it
 
