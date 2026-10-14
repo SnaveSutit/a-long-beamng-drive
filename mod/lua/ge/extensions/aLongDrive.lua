@@ -19,6 +19,7 @@ local lastVirtual -- last car position in virtual coordinates
 local resetNode -- road node the vehicle's reset transform currently points at
 local fuel, fuelCapacity -- litres, reported back by the car
 local fuelPollTimer = 0
+local currentSeed -- seed of the running road
 local chunks = {} -- chunk index -> { road, terrain } ProceduralMesh objects
 local originalPlaneMaterials = {} -- ground plane name -> material
 
@@ -178,20 +179,32 @@ local function shiftOrigin(player, pos)
   aLongDrive_pickups.collisionReloaded()
 end
 
----@param seed? number
+---@return boolean
+local function isWalking()
+  return gameplay_walk ~= nil and gameplay_walk.isWalking()
+end
+
+---@return integer a seed that differs between clicks made within the same second
+local function randomSeed()
+  return math.floor(os.time() * 1000 + os.clock() * 1000) % 1000000000 + 1
+end
+
+---@param seed? number random if omitted
+---@return boolean ok, string? reason
 function M.start(seed)
   local veh = be:getPlayerVehicle(0)
   if not veh then
     log("W", "aLongDrive", "No player vehicle, not starting")
-    return
+    return false, "No vehicle to drive. Spawn a car first."
   end
-  if gameplay_walk and gameplay_walk.isWalking() then
+  if isWalking() then
     log("W", "aLongDrive", "Get in a car before starting")
-    return
+    return false, "Get in a car first."
   end
   M.stop()
   carId = veh:getId()
-  seed = seed or os.time()
+  seed = seed or randomSeed()
+  currentSeed = seed
   local pos, dir = veh:getPosition(), veh:getDirectionVector()
   local heading = math.atan2(dir.y, dir.x)
   local behind = aLongDrive_config.road.startNodesBehind
@@ -209,6 +222,7 @@ function M.start(seed)
   local roadPos, roadRot = roadPose(carRoadNode)
   veh:setPositionRotation(roadPos.x, roadPos.y, roadPos.z, roadRot.x, roadRot.y, roadRot.z, roadRot.w)
   updateResetTransform(veh)
+  return true
 end
 
 ---@param enabled boolean
@@ -217,8 +231,27 @@ function M.setDevMode(enabled)
   aLongDrive_pickups.refresh()
 end
 
+---Starts a fresh road from a random seed.
+---@return {ok: boolean, error: string?, seed: integer?}
+function M.newGame()
+  local ok, reason = M.start()
+  return { ok = ok, error = reason, seed = ok and currentSeed or nil }
+end
+
+---For the settings page.
+---@return {active: boolean, seed: integer?, devMode: boolean, walking: boolean}
+function M.getState()
+  return {
+    active = active,
+    seed = active and currentSeed or nil,
+    devMode = aLongDrive_config.devMode,
+    walking = isWalking(),
+  }
+end
+
 function M.stop()
   active = false
+  currentSeed = nil
   clearChunks()
   setPlaneMaterial(nil)
 end
@@ -250,11 +283,6 @@ local function requestFuel(car)
     end
     obj:queueGameEngineLua(string.format("if aLongDrive then aLongDrive.setFuel(%f, %f) end", liters, capacity))
   ]])
-end
-
----@return boolean
-local function isWalking()
-  return gameplay_walk ~= nil and gameplay_walk.isWalking()
 end
 
 ---@param player table

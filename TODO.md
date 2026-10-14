@@ -15,12 +15,12 @@ Rough order within each section. Done items live in git history, not here.
 
 - [ ] Spend scrap: repairs and part upgrades (decide what it buys first)
 - [ ] Fuel: low-fuel warning, a "ran out of fuel" state, and a restart
-- [ ] Choose the beater: the player picks a beater vehicle config to start with
+- [ ] Choose the beater: the player picks a beater vehicle config to start with (part of the new-game flow, below)
 - [ ] Save scrap and progress between sessions
 
 ## Start and UI
 
-- [ ] Start and stop without the console (keybind or a simple menu), with seed entry
+- [ ] A proper new-game flow: enter a seed and pick the beater. The Mods page only has a debug random-seed button for now
 - [ ] Polish the HUD (layout, units, fuel gauge)
 - [ ] Show the collect key from the real binding instead of the `keyLabel` setting
 
