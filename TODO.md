@@ -27,7 +27,8 @@ Rough order within each section. Done items live in git history, not here.
 ## World
 
 - [ ] More dirt detail, then grass
-- [ ] Worn paint and cracked asphalt for the post-apocalyptic look; potholes and sand drifts
+- [ ] Worn paint and cracked asphalt for the post-apocalyptic look (more texture variants), potholes and sand drifts
+- [ ] Give the generated asphalt a normal map; its grain is flatter than the game's own asphalt
 - [ ] More surfaces (gravel, sand, broken asphalt), and a blended transition between surfaces
 - [ ] Wheel ruts on the dirt road; its texture is a plain tint for now
 - [ ] Road crown (camber) so the middle sits slightly above the edges
@@ -46,6 +47,7 @@ Rough order within each section. Done items live in git history, not here.
 
 ## Engineering
 
+- [ ] Markings are baked into one texture, so lane layout changes mean regenerating it. The game's DecalRoad doesn't project onto our road mesh, so decals aren't an option for now
 - [ ] Automated tests for the seeded road and pickup placement
 - [ ] Profile chunk creation for hitches at speed (about 35 ms per chunk now; could be spread over frames)
 - [ ] Package the mod as a zip for release, and write a how-to-run for it

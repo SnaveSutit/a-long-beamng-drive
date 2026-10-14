@@ -162,33 +162,39 @@ local function buildRoad(first, offset)
   local perNode = rowsPerNode()
   local segments = cfg.chunks.nodes - 1
 
-  local rows = {}
+  local rows = {} -- rows[r] = { f = fractional node index, left, right }
   for r = 0, segments * perNode do
     local f = first + r / perNode
     local center, nx, ny = centerAt(f)
-    local v = f * cfg.road.spacing / cfg.road.textureLength
-    rows[r] = {}
+    rows[r] = { f = f }
     for side = -1, 1, 2 do
       rows[r][#rows[r] + 1] = {
         x = center.x + nx * halfRoad * side - offset.x,
         y = center.y + ny * halfRoad * side - offset.y,
         z = center.z,
         nx = 0, ny = 0, nz = 1,
-        u = (side + 1) / 2, v = v,
+        u = (side + 1) / 2,
       }
     end
   end
 
-  -- one closed slab per stretch of segments with the same surface
+  -- one closed slab per stretch of segments with the same surface; the texture runs along the road
   local meshes = {}
   local runStart = 0
   for segment = 0, segments - 1 do
     local surface = aLongDrive_road.getSurface(first + segment)
     local nextSurface = segment + 1 < segments and aLongDrive_road.getSurface(first + segment + 1)
     if surface ~= nextSurface then
-      meshes[surface] = meshes[surface] or newMesh(cfg.surfaces[surface].material)
+      local def = cfg.surfaces[surface]
+      meshes[surface] = meshes[surface] or newMesh(def.material)
       local top = {}
-      for r = runStart * perNode, (segment + 1) * perNode do top[#top + 1] = rows[r] end
+      for r = runStart * perNode, (segment + 1) * perNode do
+        local v = rows[r].f * cfg.road.spacing / def.textureLength
+        top[#top + 1] = {
+          { x = rows[r][1].x, y = rows[r][1].y, z = rows[r][1].z, nx = 0, ny = 0, nz = 1, u = 0, v = v },
+          { x = rows[r][2].x, y = rows[r][2].y, z = rows[r][2].z, nx = 0, ny = 0, nz = 1, u = 1, v = v },
+        }
+      end
       addSlab(meshes[surface], top, #top, 2)
       runStart = segment + 1
     end
@@ -343,71 +349,6 @@ local function buildTerrain(first, offset)
   return mesh
 end
 
----A flat strip along the road between two fractional node indices, at a lateral offset.
----Open sheets have no collision, so lines never catch a wheel.
----@param mesh table
----@param f0 number
----@param f1 number
----@param lateral number metres left of the centre line
----@param width number
----@param offset vec3
-local function addStrip(mesh, f0, f1, lateral, width, offset)
-  local lift = aLongDrive_config.road.markings.lift
-  local base = #mesh.verts
-  for _, f in ipairs({ f0, f1 }) do
-    local center, nx, ny = centerAt(f)
-    for _, o in ipairs({ lateral - width / 2, lateral + width / 2 }) do
-      mesh.verts[#mesh.verts + 1] = { x = center.x + nx * o - offset.x, y = center.y + ny * o - offset.y, z = center.z + lift }
-    end
-  end
-  for _, v in ipairs({ 0, 2, 3, 0, 3, 1 }) do mesh.faces[#mesh.faces + 1] = { v = base + v, u = 0, n = 0 } end
-end
-
----Edge lines and a dashed centre line, on the stretches whose surface has markings.
----@param first integer first node of the chunk
----@param offset vec3
----@return table? edge mesh, table? center mesh
-local function buildMarkings(first, offset)
-  local cfg = aLongDrive_config
-  local marks = cfg.road.markings
-  local perNode = rowsPerNode()
-  local segments = cfg.chunks.nodes - 1
-  local edge = newMesh(marks.materials.edge)
-  local center = newMesh(marks.materials.center)
-  for _, mesh in ipairs({ edge, center }) do
-    mesh.uvs, mesh.normals = { { u = 0, v = 0 } }, { { x = 0, y = 0, z = 1 } }
-  end
-
-  local function marked(f)
-    return cfg.surfaces[aLongDrive_road.getSurface(math.floor(f))].markings
-  end
-
-  local edgeLateral = cfg.road.width / 2 - marks.edgeOffset
-  for r = 0, segments * perNode - 1 do
-    local f0, f1 = first + r / perNode, first + (r + 1) / perNode
-    if marked((f0 + f1) / 2) then
-      addStrip(edge, f0, f1, -edgeLateral, marks.lineWidth, offset)
-      addStrip(edge, f0, f1, edgeLateral, marks.lineWidth, offset)
-    end
-  end
-
-  -- dashes are placed by distance along the road, so they carry on across chunk edges
-  local spacing = cfg.road.spacing
-  local startS, endS = first * spacing, (first + segments) * spacing
-  for k = math.floor(startS / marks.dashPeriod), math.floor(endS / marks.dashPeriod) do
-    local from = math.max(k * marks.dashPeriod, startS)
-    local to = math.min(k * marks.dashPeriod + marks.dashLength, endS)
-    local steps = math.max(1, math.ceil((to - from) / 1))
-    for step = 0, steps - 1 do
-      local s0, s1 = from + (to - from) * step / steps, from + (to - from) * (step + 1) / steps
-      if to > from and marked((s0 + s1) / 2 / spacing) then
-        addStrip(center, s0 / spacing, s1 / spacing, 0, marks.lineWidth, offset)
-      end
-    end
-  end
-  return #edge.verts > 0 and edge or nil, #center.verts > 0 and center or nil
-end
-
 ---@class ChunkMesh
 ---@field name string used to name the scene object
 ---@field mesh table
@@ -423,9 +364,6 @@ function M.build(chunk, offset)
     meshes[#meshes + 1] = { name = "road_" .. cfg.surfaces[surface].name, mesh = mesh }
   end
   meshes[#meshes + 1] = { name = "terrain", mesh = buildTerrain(first, offset) }
-  local edge, center = buildMarkings(first, offset)
-  if edge then meshes[#meshes + 1] = { name = "edgeLines", mesh = edge } end
-  if center then meshes[#meshes + 1] = { name = "centerLine", mesh = center } end
   return meshes
 end
 

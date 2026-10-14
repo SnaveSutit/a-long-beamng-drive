@@ -14,7 +14,7 @@ Work in progress. The prototype runs on the `smallgrid` level.
 
 ## The road
 
-The road bed is a mound: flat out to the shoulder, then an embankment sloping down to the ground. Paved stretches have white edge lines and a dashed yellow centre line. The road switches between surfaces (paved and dirt to start with) in stretches of a random length, set from the seed. Each surface has its own material and ground type, so the car grips differently. Surfaces, markings and the mound are all in `config.lua` (`surfaces`, `road.markings`, `road.moundHeight`).
+The road bed is a mound: flat out to the shoulder, then an embankment sloping down to the ground. Paved stretches have white edge lines and a dashed yellow centre line, painted into the paved road texture (`mod/art/aLongDrive/road_paved.png`). Regenerate it with `bun tools/make-road-texture.ts`; keep the road width and texture length in the script in step with `config.lua`. The road switches between surfaces (paved and dirt to start with) in stretches of a random length, set from the seed. Each surface has its own material and ground type, so the car grips differently. Surfaces and the mound are in `config.lua` (`surfaces`, `road.moundHeight`, `road.embankment`).
 
 ## Collect pickups
 

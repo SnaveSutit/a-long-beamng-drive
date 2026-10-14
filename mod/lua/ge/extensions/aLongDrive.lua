@@ -20,7 +20,7 @@ local resetNode -- road node the vehicle's reset transform currently points at
 local fuel, fuelCapacity -- litres, reported back by the car
 local fuelPollTimer = 0
 local currentSeed -- seed of the running road
-local chunks = {} -- chunk index -> ProceduralMesh objects: road per surface, terrain, markings
+local chunks = {} -- chunk index -> ProceduralMesh objects: road per surface, terrain
 local originalPlaneMaterials = {} -- ground plane name -> material
 
 ---@param name string
