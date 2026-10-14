@@ -1,0 +1,23 @@
+{
+  "aLongDrive_dirt": {
+    "name": "aLongDrive_dirt",
+    "mapTo": "aLongDrive_dirt",
+    "class": "Material",
+    "version": 1.5,
+    "groundType": "DIRT",
+    "doubleSided": true,
+    "translucentBlendOp": "None",
+    "Stages": [
+      {
+        "baseColorMap": "/assets/materials/tileable/soil/t_italy_terrain_dirt/t_italy_terrain_dirt_b.color.png",
+        "baseColorFactor": [0.62, 0.42, 0.25, 1],
+        "normalMap": "/assets/materials/tileable/soil/t_italy_terrain_dirt/t_italy_terrain_dirt_nm.normal.png",
+        "roughnessFactor": 0.69,
+        "detailScale": [0.2, 0.2]
+      },
+      {},
+      {},
+      {}
+    ]
+  }
+}
