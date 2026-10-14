@@ -29,6 +29,18 @@ M.terrain = {
 
 M.devMode = false -- more pickups for testing; toggle with aLongDrive.setDevMode(true)
 
+-- Which game props stand in for each pickup. One entry is picked at random per pickup, so repeat an
+-- entry to make it more common. model and config are a folder and a .pc file in the game's vehicles/ folder.
+M.pickupProps = {
+  fuel = {
+    { model = "barrels", config = "filled_oil" },
+  },
+  scrap = {
+    { model = "cardboard_box", config = "small" },
+    { model = "cardboard_box", config = "large" },
+  },
+}
+
 M.pickups = {
   normal = { fuelChance = 0.12, scrapMin = 0, scrapMax = 1 }, -- per chunk
   dev = { fuelChance = 0.5, scrapMin = 1, scrapMax = 3 },
@@ -37,8 +49,6 @@ M.pickups = {
   collectRadius = 3, -- measured to the prop; it vanishes as the car reaches it
   fuelLiters = 8,
   scrapAmount = 1,
-  fuel = { model = "barrels", configs = { "filled_oil" } }, -- game props; one config is picked at random
-  scrap = { model = "cardboard_box", configs = { "small", "large" } },
 }
 
 M.thickness = 2 -- solid depth under the road and terrain; collision only works on closed volumes

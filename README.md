@@ -17,6 +17,10 @@ Work in progress. The prototype runs on the `smallgrid` level.
 
 Everything adjustable lives in `mod/lua/ge/extensions/aLongDrive/config.lua`: road width, hill height and grade, terrain width and relief, materials. After editing, reload with `extensions.reload("aLongDrive")`.
 
+## Pick the pickup props
+
+`pickupProps` in the same config lists the game props that stand in for each pickup, as `{ model, config }` pairs. One is picked at random per pickup, so repeat an entry to make it more common. A model is a zip in the game's `content/vehicles/` folder (for example `barrels.zip`), and its configs are the `vehicles/<model>/*.pc` files inside (`filled_oil`). The vehicle selector shows display names, not these, so list the folder instead. Entries that don't exist are skipped with a warning in the log.
+
 ## How it works
 
 - The road is generated ahead of the car and deleted behind it, from a seed.

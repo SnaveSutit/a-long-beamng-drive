@@ -4,6 +4,7 @@
 local M = {}
 
 local seed = 0
+local props = {} -- pickup kind -> configured props that exist
 local COLLISION_SETTLE_FRAMES = 10 -- props spawned sooner fall through terrain whose collision isn't live yet
 
 local active = {} -- chunk -> { pickup }
@@ -47,15 +48,16 @@ local function placementsFor(chunk)
   local list, slots = {}, 0
 
   local function place(kind)
+    if #props[kind] == 0 then return end
     local along = random() * (cfg.chunks.nodes - 1)
     local i = firstNode + math.floor(along)
     local side = random() < 0.5 and -1 or 1
     local lateral = side * (cfg.pickups.lateralMin + random() * (cfg.pickups.lateralMax - cfg.pickups.lateralMin))
     local p = roadPoint(aLongDrive_road.getNode(i), aLongDrive_road.getNode(i + 1), along % 1, lateral)
     slots = slots + 1
-    local configs = cfg.pickups[kind].configs
+    local prop = props[kind][1 + math.floor(random() * #props[kind])]
     p.kind, p.chunk, p.slot = kind, chunk, slots
-    p.config = configs[1 + math.floor(random() * #configs)]
+    p.model, p.config = prop.model, prop.config
     p.yaw = random() * 2 * math.pi
     if not collected[chunk .. ":" .. slots] then list[#list + 1] = p end
   end
@@ -70,13 +72,12 @@ end
 ---@param p table placement
 ---@param offset vec3
 local function spawnProp(p, offset)
-  local model = aLongDrive_config.pickups[p.kind].model
-  local options = fillVehicleSpawnOptionDefaults(model, { config = string.format("vehicles/%s/%s.pc", model, p.config) })
+  local options = fillVehicleSpawnOptionDefaults(p.model, { config = string.format("vehicles/%s/%s.pc", p.model, p.config) })
   options.autoEnterVehicle = false
   options.canSpawnAnotherVehicleCheck = false
   options.pos = vec3(p.x - offset.x, p.y - offset.y, p.z + 0.3)
   options.rot = quatFromEuler(0, 0, p.yaw)
-  p.vehicle = core_vehicles.spawnNewVehicle(model, options)
+  p.vehicle = core_vehicles.spawnNewVehicle(p.model, options)
 end
 
 ---Spawns a prop per placement and returns only the ones that spawned.
@@ -90,7 +91,7 @@ local function spawnAll(placements, offset)
     if p.vehicle then
       spawned[#spawned + 1] = p
     else
-      log("W", "aLongDrive", "Could not spawn pickup " .. p.kind)
+      log("W", "aLongDrive", string.format("Could not spawn %s/%s for a %s pickup", p.model, p.config, p.kind))
     end
   end
   return spawned
@@ -127,8 +128,26 @@ local function spawnPending(offset)
   end
 end
 
+---Keeps only configured props that exist and warns about the rest: the game would quietly
+---spawn the model's default config for a typo instead.
+local function loadProps()
+  props = {}
+  for kind, entries in pairs(aLongDrive_config.pickupProps) do
+    props[kind] = {}
+    for _, prop in ipairs(entries) do
+      if FS:fileExists(string.format("/vehicles/%s/%s.pc", prop.model, prop.config)) then
+        props[kind][#props[kind] + 1] = prop
+      else
+        log("W", "aLongDrive", string.format("pickupProps.%s: no config /vehicles/%s/%s.pc, skipping it", kind, prop.model, prop.config))
+      end
+    end
+    if #props[kind] == 0 then log("W", "aLongDrive", "pickupProps." .. kind .. " has no usable props, so no " .. kind .. " pickups will spawn") end
+  end
+end
+
 ---@param newSeed number
 function M.reset(newSeed)
+  loadProps()
   for chunk in pairs(active) do M.despawn(chunk) end
   pending = {}
   collected, stats = {}, { scrap = 0 }
