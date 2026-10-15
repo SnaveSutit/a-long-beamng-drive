@@ -35,23 +35,21 @@ Rough order within each section. Done items live in git history, not here.
 - [ ] More surfaces (gravel, sand, broken asphalt), and a blended transition between surfaces
 - [ ] Wheel ruts on the dirt road; its texture is a plain tint for now
 - [ ] Road crown (camber) so the middle sits slightly above the edges
-- [ ] Smooth the 0.5 m step at the road start
 - [ ] Post-apocalyptic atmosphere: abandoned wrecks, landmarks, day and night, weather
-- [ ] Check the corridor edge where the shaped terrain meets the flat plain
-- [ ] Decide on real terrain streaming or a custom level, if the plain ever limits us
+- [ ] Junctions and forks, so roads connect. Roads never cross today (see README), which avoids overlapping road meshes
+- [ ] A far-terrain ring (coarse, a few km out) so the fog that hides the edge of the loaded world can go. If the collision rebuild still hurts, try a native TerrainBlock
+- [ ] Points of interest: structures that spawn in the world and hold props (fuel, scrap), to bring pickups back. `pickups.lua` is parked until then
 
 ## Known issues
 
-- [ ] Check the seams between chunks (every ~570 m) for bumps; neighbouring chunks are separate collision meshes
 - [ ] The camera fix at world shifts covers the orbit camera only. Chase, external and others may flicker
-- [ ] The vanilla recover keys (Home and Insert) may not use the on-road reset
+- [ ] The vanilla recover keys (Home and Insert) may not use the reset spot (the ground under the car, refreshed every second)
 - [ ] Stepping out of the car means pressing the vanilla walking key (F) at a standstill
 - [ ] After a game restart the mod folder may need an unmount and mount before it loads
 
 ## Engineering
 
 - [ ] Markings are baked into one texture, so lane layout changes mean regenerating it. The game's DecalRoad doesn't project onto our road mesh, so decals aren't an option for now
-- [ ] Automated tests for the seeded road and pickup placement
-- [ ] Profile chunk creation for hitches at speed (about 35 ms per chunk now; could be spread over frames)
+- [ ] Automated tests for the seeded world: heights, biomes, road positions and chunk seams
 - [ ] Package the mod as a zip for release, and write a how-to-run for it
 - [ ] Demo and sign-off once the prototype loop (drive, collect, spend) works end to end
