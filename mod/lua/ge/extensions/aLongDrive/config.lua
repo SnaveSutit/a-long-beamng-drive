@@ -2,87 +2,100 @@
 --
 -- This file is the base: it describes the default (desert) look and holds the settings that apply everywhere.
 -- Each biome in aLongDrive/biomes/ overrides what it wants, merged over this. Tables merge key by key;
--- lists (surfaces, pickupProps) are replaced whole. A biome only changes these:
---   road.width, moundHeight, shoulder, embankment (as defaults for its surfaces), surfaces, hills,
---   terrain.relief, reliefScale, blendDistance, material, pickups and pickupProps.
+-- lists (layers, surfaces, pickupProps) are replaced whole. A biome only changes these:
+--   road.width, moundHeight, shoulder, embankment, roll (as defaults for its surfaces), surfaces,
+--   road.bends, minWavelength and features, terrain.layers and material, pickups and pickupProps.
 -- Everything else here is read from this file only.
 
 local M = {}
 
--- Shared road settings. width, moundHeight, shoulder and embankment are only defaults: each surface below
--- has its own `road` table that overrides them.
+-- The roads: contour lines of a warped coordinate, so they never meet or cross. See roads.lua.
+-- width, moundHeight, shoulder and embankment are only defaults: each surface below has its own `road` table.
 M.road = {
-  spacing = 30, -- between nodes
-  meshStep = 5, -- target metres between mesh rows; smaller is smoother and heavier
-  maxTurn = 0.1, -- radians per node; no turn is ever sharper than this
-  turnResponse = 0.3, -- how quickly the road swings onto a new turn rate, per node
-  turnWobble = 0.006, -- small random wander on top of the turns
-  turnFlip = 0.6, -- chance a new curve bends the opposite way, which makes S-curves
-  -- Kinds of curve, picked by weight. Lengths are metres; turns are radians per node (30 m), a gentle 0.02 is a
-  -- 1.5 km radius and 0.1 is a 300 m one. A biome can replace the whole list.
-  turns = {
-    { name = "straight", weight = 2, minLength = 300, maxLength = 1500, minTurn = 0, maxTurn = 0.004 },
-    { name = "gentle", weight = 3, minLength = 400, maxLength = 1400, minTurn = 0.008, maxTurn = 0.025 },
-    { name = "sweeping", weight = 2, minLength = 300, maxLength = 1000, minTurn = 0.025, maxTurn = 0.055 },
-    { name = "tight", weight = 1, minLength = 90, maxLength = 300, minTurn = 0.06, maxTurn = 0.1 },
+  spacing = 2400, -- average metres between roads; they range from about 0.4 to 1.6 times that
+  -- How far the road wanders sideways, as layers of noise: bendWavelengths are the metres between bends, and
+  -- bends the most each layer adds, which a biome can change. Bigger amplitudes or shorter wavelengths tighten
+  -- the bends, and past a point roads fold back on themselves or touch: run tools/check-roads.lua after changing them.
+  bendWavelengths = { 2000, 800, 350, 160 },
+  bends = { 220, 70, 25, 0 },
+  -- Swings: the road snakes from side to side, at several scales at once: long sweepers, medium bends, tight esses.
+  -- Unlike the bends above they only push the road along its own direction, so they can be big and tight without
+  -- roads folding back on each other. essWavelengths are metres per swing and `esses` (set by each biome) the
+  -- amplitude of each. A slow noise (technicalWavelength metres across) gates each one between technicalFloor and 1,
+  -- so they come in sections, with open stretches between. technicalStart and technicalFull are the noise values
+  -- (it sits mostly between 0.3 and 0.7) where a swing begins and reaches full size; lower values make more of the
+  -- road technical. Past a point they make hairpins too tight to drive: run tools/check-roads.lua after changing any of this.
+  essWavelengths = { 1300, 560, 250 },
+  esses = { 0, 0, 0 },
+  essDrift = 0.3, -- how far the pace of the swings drifts along the road, in swings: higher is less regular, and tighter at the fast end
+  essHarmonic = 0.35, -- how much of a second, twice-as-fast swing is mixed in, which reshapes the bends (0 is plain back and forth)
+  technicalWavelength = 1600,
+  technicalFloor = 0.1,
+  technicalStart = 0.2,
+  technicalFull = 0.5,
+  bendTransition = 1200, -- where biomes meet, the bends ease over this many metres: long, so roads do not fold
+  -- The land is reshaped around the roads so they are not just highways over the same terrain. A biome sets the
+  -- heights (metres; the base is none): hills.height builds hills across the road, which climbs over them, and
+  -- sides.height raises mountains alongside it, so it follows their foot for a stretch. Both come and go along each road.
+  features = {
+    hills = { height = 0, wavelength = 1400, width = 350 }, -- width: how far out the hill reaches either side of the road
+    sides = { height = 0, wavelength = 1800, offset = 30, plateau = 150 }, -- offset: where the slope starts; plateau: width of the top
   },
-  startNodesBehind = 20, -- road behind the car when it starts
+  segment = 240, -- metres of road per mesh
+  meshStep = 4, -- target metres between mesh rows along the road; smaller is smoother and heavier
+  flatMargin = 12, -- the ground is levelled with the road this far past the foot of its bed. The terrain mesh has a vertex
+  -- every chunks.cell metres and its triangles reach that far, so any rise closer than that would poke through the bed
+  flatWidth = 26, -- but never past this far from the centre of the road
+  blendDistance = 45, -- and eases back to the natural ground over this much further
+  minWavelength = 300, -- the road follows the terrain's layers with waves at least this long, not the small bumps. Lower is hillier
+  surfaceWavelength = 3500, -- how long a stretch of one surface lasts, roughly
+  rollWavelength = 120, -- how quickly the road's lean changes along it; each surface sets how far it may lean
+  surfaceBlend = 0.04, -- how softly one surface gives way to the next, as a share of the surface noise
   width = 8,
-  moundHeight = 0.5, -- the road bed sits this far above the ground beside it
+  moundHeight = 0.15, -- the road bed sits this far above the ground beside it, before any lean
   shoulder = 2, -- flat ground beside the road edge, before the embankment starts
   embankment = 3, -- metres of slope per metre of drop. The drop is an S-curve, so its steepest part is 1.5x the average
+  roll = 1, -- the most the road leans to one side, in degrees. The lean wanders at random along the road
 }
 
--- The biomes the road passes through, by file name in aLongDrive/biomes/. The first is where the road starts.
+-- The biomes of the world, by file name in aLongDrive/biomes/.
 M.biomes = { "desert", "badlands", "saltPlain" }
 
--- Where two surfaces meet, the road eases from one's cross-section to the other's over this many metres.
-M.surfaceTransition = 60
+-- Biomes are the cells of a jittered grid this many metres across, so a biome is about this wide.
+M.biomeSize = 2500
 
--- The same for two biomes, which also ease hill height, wavelength and the terrain's relief. Longer, since more changes.
+-- Where two biomes meet, the terrain eases from one's shape to the other's over this many metres.
 M.biomeTransition = 400
 
--- The road switches between these as it goes. Each stretch lasts a random length in metres.
--- The first is where the road starts. textureLength is the metres along the road one texture repeat covers;
+-- The road switches between these as it goes, in stretches set by a slow noise. Each takes a share of the road by its
+-- weight. textureLength is the metres along the road one texture repeat covers;
 -- the paved texture has the lane markings painted in, made by tools/make-road-texture.ts.
 M.surfaces = {
   {
-    name = "paved", material = "aLongDrive_asphalt", textureLength = 16, weight = 1, minLength = 2000, maxLength = 10000,
-    road = { width = 8, moundHeight = 0.5, shoulder = 2, embankment = 3 }, -- keep width in step with the texture tool
+    name = "paved", material = "aLongDrive_asphalt", textureLength = 16, weight = 1,
+    road = { width = 8, moundHeight = 0.15, shoulder = 2, embankment = 6, roll = 1 }, -- keep width in step with the texture tool
   },
   {
-    name = "dirt", material = "aLongDrive_roaddirt", textureLength = 6, weight = 1, minLength = 800, maxLength = 5000,
-    road = { width = 6, moundHeight = 0.1, shoulder = 1, embankment = 4 },
+    name = "dirt", material = "aLongDrive_roaddirt", textureLength = 6, weight = 1,
+    road = { width = 6, moundHeight = 0.05, shoulder = 1, embankment = 6, roll = 4 },
   },
-}
-
-M.hills = {
-  minHeight = 0.5, -- keeps the road clear of the flat plain beneath it
-  maxHeight = 100, -- road stays between minHeight and this above the plain
-  -- Layers of noise added together, from broad hills down to bumps. wavelength is metres between crests;
-  -- weight is how much of the shape the layer makes up.
-  layers = {
-    { wavelength = 2600, weight = 1 },
-    { wavelength = 1100, weight = 0.8 },
-    { wavelength = 520, weight = 0.4 },
-    { wavelength = 240, weight = 0.12 },
-  },
-  -- Keep wavelengths above about 200 m: nodes are 30 m apart, and a shorter layer can't be drawn smoothly, so it
-  -- shows up as lumps.
-  gain = 3, -- how much of the height range the layers use; higher means more of the road sits near the limits
-  variation = 0.6, -- 0 to 1: how much some stretches are hillier than others
-  maxGrade = 0.1, -- rise over run; the steepest the road is allowed to get
-  maxBend = 0.3, -- 0 to 1: the most the slope can change per node, as a fraction of maxGrade. Lower means rounder crests
 }
 
 M.terrain = {
-  halfWidth = 500, -- shaped terrain each side of the road, fading to the flat plain at the edge
-  fineWidth = 1, -- terrain this close to the road gets the fine rows; beyond it, one row per road node. Widened if the mound needs more
-  cell = 10, -- lateral spacing of terrain vertices within fineWidth
-  farCell = 30, -- and beyond it
-  blendDistance = 60, -- from the shoulder to full hill relief
-  relief = 12, -- extra height of off-road hills
-  reliefScale = 150, -- wavelength of off-road hills
+  -- Layers of noise added together, from broad hills down to bumps. wavelength is metres between crests;
+  -- amplitude is the most height the layer adds.
+  layers = {
+    { wavelength = 1200, amplitude = 32 },
+    { wavelength = 400, amplitude = 16 },
+    { wavelength = 160, amplitude = 12 },
+    { wavelength = 70, amplitude = 7 },
+    { wavelength = 40, amplitude = 3 },
+    -- The mesh has a vertex every 12 m, so waves shorter than about 36 m can't be drawn as waves: they show as
+    -- rough, uneven ground, which is what these are for.
+    { wavelength = 28, amplitude = 1.6 },
+    { wavelength = 17, amplitude = 0.8 },
+  },
+  base = 2, -- everything sits at least this far above the level's flat plain, which would hide or cut into anything below it
   textureScale = 10,
   material = "aLongDrive_dirt" -- defined in art/aLongDrive/main.materials.json,
 }
@@ -111,13 +124,16 @@ M.pickups = {
   scrapAmount = 1,
 }
 
-M.thickness = 2 -- solid depth under the road and terrain; collision only works on closed volumes
-
 M.chunks = {
-  nodes = 20, -- road nodes per chunk
-  ahead = 4,
-  behind = 1,
+  size = 240, -- metres per side
+  cell = 12, -- metres between mesh vertices; must divide size
+  radius = 2, -- chunks loaded each way around the player, so 5 x 5
+  buildBudgetMs = 2, -- milliseconds per frame spent building a chunk while the player moves
 }
+
+-- Fog hides the edge of the loaded world, where the terrain stops short of the level's flat plain.
+-- Visibility is roughly 3 / fogDensity metres; the level's own value is restored when the world stops.
+M.fogDensity = 0.005
 
 M.shiftDistance = 15000 -- distance from the origin before the car and world are shifted back
 

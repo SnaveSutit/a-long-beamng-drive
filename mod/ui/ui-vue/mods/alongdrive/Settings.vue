@@ -2,7 +2,7 @@
   <div ref="settingsRoot" class="ald-settings">
     <header class="ald-head">
       <h1>A Long Drive</h1>
-      <p>An endless road with fuel and scrap to find. Debug controls for the prototype.</p>
+      <p>An endless world to explore. Debug controls for the prototype.</p>
     </header>
 
     <div v-if="error" class="ald-error">{{ error }}</div>
@@ -10,7 +10,7 @@
 
     <section class="ald-status">
       <div>
-        <div class="ald-label">Road</div>
+        <div class="ald-label">World</div>
         <div class="ald-value">{{ state.active ? "Running" : "Not running" }}</div>
       </div>
       <div>
@@ -27,7 +27,7 @@
       <div class="ald-copy">
         <div class="ald-label">New game</div>
         <div class="ald-desc">
-          Builds a new road from a random seed and puts your current car on it. The seed is shown above, so a run can be
+          Builds a new world from a random seed and puts your current car in it. The seed is shown above, so a run can be
           repeated from the console with <code>aLongDrive.start(seed)</code>.
         </div>
       </div>
@@ -37,47 +37,16 @@
     <section class="ald-row">
       <div class="ald-copy">
         <div class="ald-label">Stop</div>
-        <div class="ald-desc">Removes the road, terrain and pickups, and puts the level's ground back.</div>
+        <div class="ald-desc">Removes the terrain and puts the level's ground back.</div>
       </div>
       <BngButton accent="outlined" :disabled="loading || !state.active" @click="stop">Stop</BngButton>
     </section>
 
     <section class="ald-row">
       <div class="ald-copy">
-        <div class="ald-label">Frequent pickups</div>
-        <div class="ald-desc">Fuel and scrap spawn far more often, for testing. Takes effect straight away.</div>
-      </div>
-      <BngSwitch :model-value="state.devMode" :disabled="loading" @update:model-value="setDevMode" />
-    </section>
-
-    <section v-for="surface in state.surfaces" :key="surface.name" class="ald-row">
-      <div class="ald-copy">
-        <div class="ald-label">Shoulder width: {{ state.biome }} {{ surface.name }}</div>
-        <div class="ald-desc">
-          Flat ground beside the {{ surface.name }} road in the biome you are driving through, before the embankment
-          starts. A running road is rebuilt in place. For a lasting change, set <code>road.shoulder</code> on the
-          surface in that biome's file.
-        </div>
-      </div>
-      <BngSlider
-        class="ald-slider"
-        :model-value="surface.shoulder"
-        :min="0"
-        :max="state.maxShoulder"
-        :step="0.5"
-        :debounce="300"
-        :disabled="loading"
-        with-input
-        unit=" m"
-        @update:model-value="value => setShoulder(surface, value)"
-      />
-    </section>
-
-    <section class="ald-row">
-      <div class="ald-copy">
         <div class="ald-label">Reload</div>
         <div class="ald-desc">
-          Reload mod picks up edits to the Lua code, config and materials, and restarts a running road with the same
+          Reload mod picks up edits to the Lua code, config and materials, and restarts a running world with the same
           seed. Reload UI is for edits to this page, and closes the menu.
         </div>
       </div>
@@ -91,7 +60,7 @@
 
 <script setup>
 import { onMounted, onUnmounted, reactive, ref } from "vue"
-import { BngButton, BngSlider, BngSwitch } from "@/common/components/base"
+import { BngButton } from "@/common/components/base"
 import { useBridge } from "@/bridge"
 
 const POLL_MS = 500
@@ -103,7 +72,7 @@ const error = ref("")
 let settingsCard = null
 let pollTimer = null
 
-const state = reactive({ active: false, seed: null, devMode: false, walking: false, maxShoulder: 12, biome: "", surfaces: [] })
+const state = reactive({ active: false, seed: null, walking: false, biome: "" })
 
 function runLua(code) {
   return new Promise(resolve => api.engineLua(code, resolve))
@@ -165,22 +134,6 @@ async function reloadMod() {
 
 function reloadUi() {
   runLua("reloadUI()")
-}
-
-function setShoulder(surface, value) {
-  surface.shoulder = value
-  error.value = ""
-  runLua(`aLongDrive.setShoulder(${Number(value)}, ${JSON.stringify(surface.name)})`).catch(() => {
-    error.value = "That change could not be applied."
-  })
-}
-
-function setDevMode(value) {
-  state.devMode = value
-  error.value = ""
-  runLua(`aLongDrive.setDevMode(${value ? "true" : "false"})`).catch(() => {
-    error.value = "That change could not be saved."
-  })
 }
 
 onMounted(() => {
@@ -266,11 +219,6 @@ onUnmounted(() => {
 .ald-buttons {
   display: flex;
   gap: 0.25rem;
-}
-
-.ald-slider {
-  flex: 0 0 16rem;
-  max-width: 16rem;
 }
 
 .ald-label {

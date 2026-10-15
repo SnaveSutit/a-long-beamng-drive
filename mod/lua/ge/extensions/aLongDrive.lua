@@ -1,31 +1,32 @@
--- A Long Drive: endless procedural road and terrain with a floating origin.
+-- A Long Drive: endless procedural world, streamed in chunks, with a floating origin.
 
 local M = {}
-M.dependencies = { "ui_imgui", "aLongDrive_config", "aLongDrive_biomes", "aLongDrive_road", "aLongDrive_meshBuilder", "aLongDrive_pickups", "aLongDrive_hud" }
+M.dependencies = { "ui_imgui", "aLongDrive_config", "aLongDrive_biomes", "aLongDrive_noise", "aLongDrive_roads", "aLongDrive_world", "aLongDrive_meshBuilder", "aLongDrive_hud" }
 
-local RESET_HEIGHT = 0.5 -- reset position above the road surface
+local RESET_HEIGHT = 0.5 -- reset position above the ground
 -- unload order for a reload: the extension first, then what it depends on, the biome files last
-local MODULES = { "aLongDrive", "aLongDrive_hud", "aLongDrive_pickups", "aLongDrive_meshBuilder", "aLongDrive_road", "aLongDrive_biomes", "aLongDrive_config" }
+local MODULES = { "aLongDrive", "aLongDrive_hud", "aLongDrive_meshBuilder", "aLongDrive_world", "aLongDrive_roads", "aLongDrive_noise", "aLongDrive_biomes", "aLongDrive_config" }
 local UNPACKED_MOD = "/mods/unpacked/a_long_drive/"
-local MAX_SHOULDER = 12
 local TELEPORT_GRACE_FRAMES = 3
 local ORBIT_WORLD_POSITIONS = { "camLastTargetPos", "camLastTargetPos2", "camLastPos", "camLastPos2", "camLastPosPerp", "preResetPos" }
 
 local active = false
 local offset = vec3(0, 0, 0) -- virtual position = world position + offset
 local carId -- the vehicle the player started in; it stays put while they walk
-local playerNode = 0 -- road node nearest the player (car or on foot), drives chunk streaming
-local carRoadNode = 0 -- road node nearest the car, drives its reset position
-local IN_CAR_HINT_DISTANCE = 6 -- tell a driver who is this close to a pickup to get out
+local playerVirtual = vec3(0, 0, 0) -- player position in virtual coordinates, drives chunk streaming
 local FUEL_POLL_SECONDS = 0.25
+local RESET_UPDATE_SECONDS = 1
 local distance = 0 -- metres driven since start
 local lastVirtual -- last car position in virtual coordinates
-local resetNode -- road node the vehicle's reset transform currently points at
+local resetTimer = 0 -- seconds until the car's reset transform is refreshed
 local fuel, fuelCapacity -- litres, reported back by the car
 local fuelPollTimer = 0
-local currentSeed -- seed of the running road
-local chunks = {} -- chunk index -> ProceduralMesh objects: road per surface, terrain
+local currentSeed -- seed of the running world
+local collisionStale = false -- chunks changed since the collision world was last rebuilt
+local job -- the chunk being built a slice at a time: { entry, thread }
+local chunks = {} -- key -> { entry, objects = ProceduralMesh objects }
 local originalPlaneMaterials = {} -- ground plane name -> material
+local originalFogDensity -- the level's own, while ours is in effect
 
 ---@param name string
 ---@param mesh table
@@ -40,65 +41,133 @@ local function createMeshObject(name, mesh)
   return object
 end
 
----@param c integer
-local function createChunk(c)
-  local objects = {}
-  for _, entry in ipairs(aLongDrive_meshBuilder.build(c, offset)) do
-    objects[#objects + 1] = createMeshObject(string.format("aLongDrive_%s_%d", entry.name, c), entry.mesh)
-  end
-  chunks[c] = objects
-  aLongDrive_pickups.spawn(c)
+---A thing that is streamed in: a square of terrain, or a segment of road.
+---@class ChunkEntry
+---@field key string
+---@field kind "terrain"|"road"
+---@field a integer terrain: chunk column; road: which road
+---@field b integer terrain: chunk row; road: which segment along it
+---@field x number virtual position of its middle
+---@field y number
+
+---@return ChunkEntry
+local function terrainEntry(cx, cy)
+  local size = aLongDrive_config.chunks.size
+  return { key = "t:" .. cx .. ":" .. cy, kind = "terrain", a = cx, b = cy, x = (cx + 0.5) * size, y = (cy + 0.5) * size }
 end
 
-local function deleteChunk(c)
-  for _, object in ipairs(chunks[c]) do object:delete() end
-  aLongDrive_pickups.despawn(c)
-  chunks[c] = nil
+---@return ChunkEntry
+local function roadEntry(k, j)
+  local x, y = aLongDrive_roads.centreAt(k, (j + 0.5) * aLongDrive_config.road.segment)
+  return { key = "r:" .. k .. ":" .. j, kind = "road", a = k, b = j, x = x, y = y }
+end
+
+---@param entry ChunkEntry
+---@param yield? fun()
+---@return ChunkMesh[]
+local function buildEntry(entry, yield)
+  if entry.kind == "terrain" then return aLongDrive_meshBuilder.build(entry.a, entry.b, offset, yield) end
+  return aLongDrive_meshBuilder.buildRoad(entry.a, entry.b, offset, yield)
+end
+
+---@param entry ChunkEntry
+---@param meshes ChunkMesh[]
+local function createObjects(entry, meshes)
+  local objects = {}
+  for _, mesh in ipairs(meshes) do
+    local name = string.format("aLongDrive_%s_%d_%d", mesh.name, entry.a, entry.b):gsub("-", "n")
+    objects[#objects + 1] = createMeshObject(name, mesh.mesh)
+  end
+  chunks[entry.key] = { entry = entry, objects = objects }
+  collisionStale = true
+end
+
+---@param key string
+local function deleteChunk(key)
+  for _, object in ipairs(chunks[key].objects) do object:delete() end
+  chunks[key] = nil
+  collisionStale = true
 end
 
 local function clearChunks()
-  for c in pairs(chunks) do deleteChunk(c) end
+  for key in pairs(chunks) do deleteChunk(key) end
   be:reloadCollision()
+  collisionStale = false
 end
 
-local function updateChunks()
+---Builds the job's chunk for a few milliseconds, and creates it when the last slice is done.
+---@return boolean finished
+local function advanceJob()
+  local start = os.clock()
+  repeat
+    local ok, result = coroutine.resume(job.thread)
+    if not ok then error(debug.traceback(job.thread, result)) end
+    if coroutine.status(job.thread) == "dead" then
+      createObjects(job.entry, result)
+      job = nil
+      return true
+    end
+  until (os.clock() - start) * 1000 >= aLongDrive_config.chunks.buildBudgetMs
+  return false
+end
+
+---Loads the chunks around the player, nearest first, and drops the ones left behind.
+---Chunks are dropped one ring beyond the loaded area, so crossing a border back and forth rebuilds nothing.
+---Moving, one chunk at a time is built in slices of a few milliseconds per frame.
+---@param all? boolean build every missing chunk now, in one go
+local function updateChunks(all)
   local cfg = aLongDrive_config.chunks
-  local stride = cfg.nodes - 1 -- neighbouring chunks share one node
-  local playerChunk = math.floor(playerNode / stride)
-  local first, last = math.max(0, playerChunk - cfg.behind), playerChunk + cfg.ahead
-  local changed = false
-  for c in pairs(chunks) do
-    if c < first or c > last then
-      deleteChunk(c)
-      changed = true
-    end
-  end
-  for c = first, last do
-    if not chunks[c] then
-      createChunk(c)
-      changed = true
-    end
-  end
-  if changed then
-    be:reloadCollision()
-    aLongDrive_pickups.collisionReloaded()
-  end
-end
+  local px, py = playerVirtual.x, playerVirtual.y
+  local centerX, centerY = math.floor(px / cfg.size), math.floor(py / cfg.size)
 
----Walks a road node index forward to the node nearest a position.
----@param node integer
----@param pos vec3 world position
----@return integer
-local function advanceNode(node, pos)
-  local vx, vy = pos.x + offset.x, pos.y + offset.y
-  local function distSq(i)
-    local n = aLongDrive_road.getNode(i)
-    return (n.x - vx) ^ 2 + (n.y - vy) ^ 2
+  local wanted, wantedKeys = {}, {}
+  for dx = -cfg.radius, cfg.radius do
+    for dy = -cfg.radius, cfg.radius do wanted[#wanted + 1] = terrainEntry(centerX + dx, centerY + dy) end
   end
-  while distSq(node + 1) < distSq(node) do
-    node = node + 1
+  for _, segment in ipairs(aLongDrive_roads.segmentsNear(px, py, (cfg.radius + 0.5) * cfg.size)) do
+    wanted[#wanted + 1] = roadEntry(segment.k, segment.j)
   end
-  return node
+  for _, entry in ipairs(wanted) do
+    entry.distanceSq = (entry.x - px) ^ 2 + (entry.y - py) ^ 2
+    wantedKeys[entry.key] = true
+  end
+  table.sort(wanted, function(a, b) return a.distanceSq < b.distanceSq end)
+
+  local dropReach = (cfg.radius + 1.5) * cfg.size
+  for key, chunk in pairs(chunks) do
+    local entry = chunk.entry
+    local kept
+    if entry.kind == "terrain" then
+      kept = math.max(math.abs(entry.a - centerX), math.abs(entry.b - centerY)) <= cfg.radius + 1
+    else
+      kept = (entry.x - px) ^ 2 + (entry.y - py) ^ 2 <= dropReach * dropReach
+    end
+    if not kept then deleteChunk(key) end
+  end
+  if job and not wantedKeys[job.entry.key] then job = nil end
+
+  local missing = {}
+  for _, entry in ipairs(wanted) do
+    if not chunks[entry.key] then missing[#missing + 1] = entry end
+  end
+
+  local pending = #missing
+  if all then
+    job = nil
+    for _, entry in ipairs(missing) do createObjects(entry, buildEntry(entry)) end
+    pending = 0
+  else
+    if not job and pending > 0 then
+      local entry = missing[1]
+      job = { entry = entry, thread = coroutine.create(function() return buildEntry(entry, coroutine.yield) end) }
+    end
+    if job and advanceJob() then pending = pending - 1 end
+  end
+  -- rebuilding collision costs about 0.4 ms per chunk in the world whatever changed, so do it once, when the new chunks are all in
+  if collisionStale and not job and pending == 0 then
+    be:reloadCollision()
+    collisionStale = false
+  end
 end
 
 ---Swaps the level's ground plane material, remembering the originals.
@@ -113,6 +182,20 @@ local function setPlaneMaterial(material)
     end
   end
   if not material then originalPlaneMaterials = {} end
+end
+
+---@param density? number nil restores the level's own
+local function setFogDensity(density)
+  local info = scenetree.theLevelInfo
+  if not info then return end
+  if density then
+    originalFogDensity = originalFogDensity or info:getField("fogDensity", 0)
+    info:setField("fogDensity", 0, tostring(density))
+  elseif originalFogDensity then
+    info:setField("fogDensity", 0, originalFogDensity)
+    originalFogDensity = nil
+  end
+  info:postApply()
 end
 
 ---A teleport makes the orbit camera reset its speed-based pitch and drop its FOV boost.
@@ -144,23 +227,27 @@ local function shiftOrbitCamera(veh, shift)
   ignoreShiftInOrbitCamera(orbit)
 end
 
----Road position and heading at a node, in world coordinates.
----@param i integer node index
----@return vec3 position, quat rotation
-local function roadPose(i)
-  local node, nextNode = aLongDrive_road.getNode(i), aLongDrive_road.getNode(i + 1)
-  local forward = vec3(nextNode.x - node.x, nextNode.y - node.y, 0)
-  local rotation = quatFromDir(forward, vec3(0, 0, 1)) * quat(0, 0, 1, 0) -- vehicle forward is inverted
-  return vec3(node.x - offset.x, node.y - offset.y, node.z + RESET_HEIGHT), rotation
+---Where the car belongs on the ground under a position, level and facing the way it points.
+---@param pos vec3 world position
+---@param dir vec3 the way the car points
+---@return vec3? position, quat? rotation nil when the car points straight up or down
+local function groundPose(pos, dir)
+  local forward = vec3(dir.x, dir.y, 0)
+  if forward:length() < 0.1 then return end
+  local height = aLongDrive_world.surfaceHeightAt(pos.x + offset.x, pos.y + offset.y)
+  return vec3(pos.x, pos.y, height + RESET_HEIGHT), quatFromDir(forward, vec3(0, 0, 1)) * quat(0, 0, 1, 0) -- vehicle forward is inverted
 end
 
----Points the car's reset position at the road under it, so a reset puts it back on the road.
+---Points the car's reset position at the ground under it, so a reset puts it back upright where it is.
 ---@param car table
-local function updateResetTransform(car)
-  if resetNode == carRoadNode then return end
-  local pos, rot = roadPose(carRoadNode)
+---@param dtReal number
+local function updateResetTransform(car, dtReal)
+  resetTimer = resetTimer - dtReal
+  if resetTimer > 0 then return end
+  local pos, rot = groundPose(car:getPosition(), car:getDirectionVector())
+  if not pos then return end
   car:setOriginalTransform(pos.x, pos.y, pos.z, rot.x, rot.y, rot.z, rot.w)
-  resetNode = carRoadNode
+  resetTimer = RESET_UPDATE_SECONDS
 end
 
 ---Moves every vehicle, the player's included, so the car and any parked or prop vehicles stay in place
@@ -174,13 +261,14 @@ local function shiftOrigin(player, pos)
     veh:setClusterPosRelRot(veh:getRefNodeId(), p.x - shift.x, p.y - shift.y, p.z, 0, 0, 0, 1)
   end
   offset = offset + shift
-  resetNode = nil
+  job = nil -- it was built against the old offset
+  resetTimer = 0
   shiftOrbitCamera(player, shift)
-  for _, objects in pairs(chunks) do
-    for _, object in ipairs(objects) do object:setPosition(object:getPosition() - shift) end
+  for _, chunk in pairs(chunks) do
+    for _, object in ipairs(chunk.objects) do object:setPosition(object:getPosition() - shift) end
   end
   be:reloadCollision()
-  aLongDrive_pickups.collisionReloaded()
+  collisionStale = false
 end
 
 ---@return boolean
@@ -193,30 +281,31 @@ local function randomSeed()
   return math.floor(os.time() * 1000 + os.clock() * 1000) % 1000000000 + 1
 end
 
----Sets everything up for a new road. May throw; M.start catches that.
+---Sets everything up for a new world. May throw; M.start catches that.
 ---@param veh table the player's vehicle
 ---@param seed integer
 local function begin(veh, seed)
   carId = veh:getId()
   currentSeed = seed
-  local pos, dir = veh:getPosition(), veh:getDirectionVector()
-  local heading = math.atan2(dir.y, dir.x)
-  local behind = aLongDrive_config.road.startNodesBehind
-  local back = behind * aLongDrive_config.road.spacing
-  offset = vec3(0, 0, 0)
-  playerNode, carRoadNode = behind, behind
-  distance, lastVirtual, resetNode = 0, nil, nil
+  local pos = veh:getPosition()
+  offset = vec3(-pos.x, -pos.y, 0) -- the car starts at the virtual origin, so a seed gives the same world wherever it starts
+  distance, lastVirtual, resetTimer, job = 0, nil, 0, nil
   aLongDrive_biomes.reset()
-  aLongDrive_pickups.reset(seed)
-  aLongDrive_road.reset(seed, pos.x - math.cos(heading) * back, pos.y - math.sin(heading) * back, aLongDrive_config.hills.minHeight, heading)
-  aLongDrive_meshBuilder.setSeed(seed)
+  aLongDrive_world.setSeed(seed)
+  aLongDrive_roads.setSeed(seed)
   setPlaneMaterial(aLongDrive_config.terrain.material)
+  setFogDensity(aLongDrive_config.fogDensity)
   fuel, fuelCapacity, fuelPollTimer = nil, nil, 0
   active = true
-  updateChunks()
-  local roadPos, roadRot = roadPose(carRoadNode)
-  veh:setPositionRotation(roadPos.x, roadPos.y, roadPos.z, roadRot.x, roadRot.y, roadRot.z, roadRot.w)
-  updateResetTransform(veh)
+
+  -- the car starts on the nearest road, pointing the way it already pointed
+  local roadX, roadY, dirX, dirY = aLongDrive_roads.poseNear(0, 0)
+  local carDir = veh:getDirectionVector()
+  if dirX * carDir.x + dirY * carDir.y < 0 then dirX, dirY = -dirX, -dirY end
+  playerVirtual = vec3(roadX, roadY, 0)
+  updateChunks(true)
+  local groundPos, groundRot = groundPose(vec3(roadX - offset.x, roadY - offset.y, 0), vec3(dirX, dirY, 0))
+  veh:setPositionRotation(groundPos.x, groundPos.y, groundPos.z, groundRot.x, groundRot.y, groundRot.z, groundRot.w)
 end
 
 ---@param seed? number random if omitted
@@ -241,69 +330,30 @@ function M.start(seed)
   return true
 end
 
----Builds the chunks again from the current config, without moving the car or the road.
-function M.rebuild()
-  if not active then return end
-  clearChunks()
-  updateChunks()
-end
-
----The biome under the player, or the first one when no road is running.
----@return integer
-local function currentBiome()
-  return active and aLongDrive_road.getBiome(playerNode) or 1
-end
-
----@param width number metres of flat ground beside the road edge
----@param surfaceName? string one surface of the current biome, or all of its surfaces if omitted
-function M.setShoulder(width, surfaceName)
-  width = math.max(0, math.min(width, MAX_SHOULDER))
-  for _, def in ipairs(aLongDrive_biomes.get(currentBiome()).surfaces) do
-    if not surfaceName or def.name == surfaceName then
-      def.road = def.road or {}
-      def.road.shoulder = width
-    end
-  end
-  M.rebuild()
-end
-
----@param enabled boolean
-function M.setDevMode(enabled)
-  aLongDrive_config.devMode = enabled
-  aLongDrive_pickups.refresh()
-end
-
----Starts a fresh road from a random seed.
+---Starts a fresh world from a random seed.
 ---@return {ok: boolean, error: string?, seed: integer?}
 function M.newGame()
   local ok, reason = M.start()
   return { ok = ok, error = reason, seed = ok and currentSeed or nil }
 end
 
----For the settings page. Surfaces are those of the biome under the player.
----@return {active: boolean, seed: integer?, devMode: boolean, walking: boolean, maxShoulder: number, biome: string, surfaces: {name: string, shoulder: number}[]}
+---For the settings page.
+---@return {active: boolean, seed: integer?, walking: boolean, biome: string}
 function M.getState()
-  local biome = currentBiome()
-  local surfaces = {}
-  for index, def in ipairs(aLongDrive_biomes.get(biome).surfaces) do
-    surfaces[#surfaces + 1] = { name = def.name, shoulder = aLongDrive_road.getRegionProfile({ biome = biome, surface = index }).shoulder }
-  end
+  local biome = active and aLongDrive_world.biomeAt(playerVirtual.x, playerVirtual.y) or 1
   return {
     active = active,
     seed = active and currentSeed or nil,
-    devMode = aLongDrive_config.devMode,
     walking = isWalking(),
-    maxShoulder = MAX_SHOULDER,
     biome = aLongDrive_biomes.def(biome).name,
-    surfaces = surfaces,
   }
 end
 
----Reloads every module of the mod from disk. A road that was running restarts with the same seed.
+---Reloads every module of the mod from disk. A world that was running restarts with the same seed.
 ---Meant for development: it picks up code, config and material edits without restarting the game.
 ---@return {ok: boolean, restarted: boolean, error: string?}
 function M.reload()
-  local wasActive, seed, devMode = active, currentSeed, aLongDrive_config.devMode
+  local wasActive, seed = active, currentSeed
 
   if FS:directoryExists(UNPACKED_MOD) then -- a stale mount hides new or renamed files
     FS:unmount(UNPACKED_MOD)
@@ -315,7 +365,6 @@ function M.reload()
   extensions.load("aLongDrive")
   if not aLongDrive then return { ok = false, restarted = false, error = "The mod failed to load again. Check the log." } end
 
-  aLongDrive_config.devMode = devMode
   if not wasActive then return { ok = true, restarted = false } end
   local ok, reason = aLongDrive.start(seed)
   return { ok = ok, restarted = ok, error = reason }
@@ -323,9 +372,11 @@ end
 
 function M.stop()
   active = false
+  job = nil
   currentSeed = nil
   clearChunks()
   setPlaneMaterial(nil)
+  setFogDensity(nil)
 end
 
 ---@param pos vec3 world position
@@ -357,31 +408,13 @@ local function requestFuel(car)
   ]])
 end
 
----@param player table
-local function drawHud(player)
-  local prompt
-  if isWalking() then
-    local pickup = aLongDrive_pickups.nearest(player:getPosition(), aLongDrive_config.pickups.reach)
-    if pickup then prompt = string.format("[%s] Collect %s", aLongDrive_config.pickups.keyLabel, pickup.kind) end
-  end
+local function drawHud()
   aLongDrive_hud.draw({
     fuel = fuel,
     fuelCapacity = fuelCapacity,
-    scrap = aLongDrive_pickups.getStats().scrap,
+    scrap = 0,
     distance = distance,
-    prompt = prompt,
   })
-end
-
----Bound to the collect key: picks up the pickup in reach while on foot.
-function M.collect()
-  local player, car = be:getPlayerVehicle(0), be:getObjectByID(carId or -1)
-  if not (active and player and car) then return end
-  if isWalking() then
-    aLongDrive_pickups.collectNearest(player:getPosition(), car)
-  elseif aLongDrive_pickups.nearest(player:getPosition(), IN_CAR_HINT_DISTANCE) then
-    ui_message("Get out of the car to pick that up", 3, "aLongDrive")
-  end
 end
 
 local MATERIALS_FILE = "/art/aLongDrive/main.materials.json"
@@ -406,17 +439,15 @@ local function update(dtReal)
     return
   end
   local pos = player:getPosition()
-  playerNode = advanceNode(playerNode, pos)
-  carRoadNode = advanceNode(carRoadNode, car:getPosition())
-  updateResetTransform(car)
+  playerVirtual = vec3(pos.x + offset.x, pos.y + offset.y, 0)
+  updateResetTransform(car, dtReal)
   fuelPollTimer = fuelPollTimer - dtReal
   if fuelPollTimer <= 0 then
     fuelPollTimer = FUEL_POLL_SECONDS
     requestFuel(car)
   end
   trackDistance(pos)
-  aLongDrive_pickups.update(offset)
-  drawHud(player)
+  drawHud()
   if math.max(math.abs(pos.x), math.abs(pos.y)) > aLongDrive_config.shiftDistance then
     shiftOrigin(player, pos)
   else

@@ -3,7 +3,7 @@
     "cat": "gameplay",
     "order": 200,
     "ctx": "tlua",
-    "onDown": "if aLongDrive then aLongDrive.collect() end",
+    "onDown": "if aLongDrive and aLongDrive.collect then aLongDrive.collect() end",
     "title": "Collect pickup",
     "desc": "On foot, pick up the fuel or scrap in front of you"
   }
